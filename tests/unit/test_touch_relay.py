@@ -8,12 +8,19 @@ import pygame
 import pytest
 
 from deskcamdio.services.touch_relay import (
+    ABS_MT_POSITION_X,
+    ABS_MT_POSITION_Y,
+    ABS_MT_SLOT,
+    ABS_MT_TRACKING_ID,
     ABS_X,
     ABS_Y,
     BTN_TOUCH,
     EV_ABS,
     EV_KEY,
+    EV_SYN,
     EVENT_STRUCT,
+    SYN_DROPPED,
+    SYN_REPORT,
     AbsAxisRange,
     TouchRelay,
     decode_events,
@@ -69,7 +76,9 @@ def test_press_motion_release_sequence(drained_events) -> None:
             (EV_ABS, ABS_X, 1000),
             (EV_ABS, ABS_Y, 1600),
             (EV_KEY, BTN_TOUCH, 1),
+            (EV_SYN, SYN_REPORT, 0),
             (EV_ABS, ABS_X, 500),
+            (EV_SYN, SYN_REPORT, 0),
         ]
     )
     events = pygame.event.get()
@@ -82,16 +91,65 @@ def test_press_motion_release_sequence(drained_events) -> None:
     motion = next(e for e in events if e.type == pygame.MOUSEMOTION and e.buttons == (1, 0, 0))
     assert motion.pos == (120, 256)
 
-    relay.consume([(EV_KEY, BTN_TOUCH, 0)])
+    relay.consume([(EV_KEY, BTN_TOUCH, 0), (EV_SYN, SYN_REPORT, 0)])
     ups = [e for e in pygame.event.get() if e.type == pygame.MOUSEBUTTONUP]
     assert len(ups) == 1 and ups[0].pos == (120, 256)
-    assert ups[0].button == 1 and ups[0].buttons == (1, 0, 0)
+    assert ups[0].button == 1 and ups[0].buttons == (0, 0, 0)
 
 
 def test_press_without_coordinates_is_ignored(drained_events) -> None:
     relay = _relay()
     relay.consume([(EV_KEY, BTN_TOUCH, 1)])
     assert pygame.event.get() == []
+    assert relay._pressed is False
+
+
+def test_press_waits_for_report_and_uses_fresh_coordinates(drained_events) -> None:
+    relay = _relay()
+    relay.consume(
+        [
+            (EV_ABS, ABS_X, 100),
+            (EV_ABS, ABS_Y, 100),
+            (EV_KEY, BTN_TOUCH, 1),
+            (EV_SYN, SYN_REPORT, 0),
+            (EV_KEY, BTN_TOUCH, 0),
+            (EV_SYN, SYN_REPORT, 0),
+        ]
+    )
+    pygame.event.get()
+
+    # This bridge sends BTN_TOUCH before the new tap coordinates.  No event
+    # may be posted until the whole report arrives.
+    relay.consume([(EV_KEY, BTN_TOUCH, 1)])
+    assert pygame.event.get() == []
+    relay.consume(
+        [
+            (EV_ABS, ABS_X, 1800),
+            (EV_ABS, ABS_Y, 1600),
+            (EV_SYN, SYN_REPORT, 0),
+        ]
+    )
+    down = next(e for e in pygame.event.get() if e.type == pygame.MOUSEBUTTONDOWN)
+    assert down.pos == (432, 256)
+
+
+def test_mt_only_primary_contact_and_dropped_report(drained_events) -> None:
+    relay = _relay()
+    relay.consume(
+        [
+            (EV_ABS, ABS_MT_SLOT, 0),
+            (EV_ABS, ABS_MT_TRACKING_ID, 7),
+            (EV_ABS, ABS_MT_POSITION_X, 1000),
+            (EV_ABS, ABS_MT_POSITION_Y, 500),
+            (EV_SYN, SYN_REPORT, 0),
+        ]
+    )
+    down = next(e for e in pygame.event.get() if e.type == pygame.MOUSEBUTTONDOWN)
+    assert down.pos == (240, 80)
+
+    relay.consume([(EV_SYN, SYN_DROPPED, 0)])
+    up = next(e for e in pygame.event.get() if e.type == pygame.MOUSEBUTTONUP)
+    assert up.pos == (240, 80)
     assert relay._pressed is False
 
 
@@ -148,7 +206,12 @@ def test_relay_stop_before_open_is_clean(tmp_path: Path) -> None:
 def test_relay_run_reads_regular_file_and_posts(drained_events, tmp_path: Path) -> None:
     import time as _time
 
-    payload = pack(EV_ABS, ABS_X, 1000) + pack(EV_ABS, ABS_Y, 1000) + pack(EV_KEY, BTN_TOUCH, 1)
+    payload = (
+        pack(EV_ABS, ABS_X, 1000)
+        + pack(EV_ABS, ABS_Y, 1000)
+        + pack(EV_KEY, BTN_TOUCH, 1)
+        + pack(EV_SYN, SYN_REPORT, 0)
+    )
     device = tmp_path / "fake.event"
     device.write_bytes(payload)
 

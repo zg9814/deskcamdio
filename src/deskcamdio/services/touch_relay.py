@@ -31,8 +31,14 @@ EV_SYN = 0x00
 EV_KEY = 0x01
 EV_ABS = 0x03
 
+SYN_REPORT = 0x00
+SYN_DROPPED = 0x03
 ABS_X = 0x00
 ABS_Y = 0x01
+ABS_MT_SLOT = 0x2F
+ABS_MT_POSITION_X = 0x35
+ABS_MT_POSITION_Y = 0x36
+ABS_MT_TRACKING_ID = 0x39
 BTN_TOUCH = 0x14A
 EVIOCGRAB = 0x40044590
 
@@ -135,7 +141,11 @@ class TouchRelay(threading.Thread):
         self._raw_x: int | None = None
         self._raw_y: int | None = None
         self._pressed = False
+        self._desired_pressed = False
         self._motion_dirty = False
+        self._current_slot = 0
+        self._mt_protocol = False
+        self._last_posted_pos: tuple[int, int] | None = None
         self.ready = threading.Event()
         self.grabbed = False
 
@@ -165,36 +175,109 @@ class TouchRelay(threading.Thread):
     def consume(self, records: list[tuple[int, int, int]]) -> None:
         for etype, code, value in records:
             self._apply(etype, code, value)
-        if self._pressed and self._motion_dirty:
-            pos = self.position()
-            if pos is not None:
-                self._post(pygame.MOUSEMOTION, pos, (0, 0), (1, 0, 0))
-            self._motion_dirty = False
 
     def _apply(self, etype: int, code: int, value: int) -> None:
-        if etype == EV_ABS and code == ABS_X:
-            self._raw_x = value
-            if self._pressed:
-                self._motion_dirty = True
-        elif etype == EV_ABS and code == ABS_Y:
-            self._raw_y = value
-            if self._pressed:
-                self._motion_dirty = True
+        if etype == EV_SYN:
+            self._apply_syn(code)
+        elif etype == EV_ABS:
+            self._apply_abs(code, value)
         elif etype == EV_KEY and code == BTN_TOUCH:
             self._apply_button(value)
 
+    def _apply_syn(self, code: int) -> None:
+        if code == SYN_REPORT:
+            self._flush_report()
+        elif code == SYN_DROPPED:
+            self._recover_dropped_report()
+
+    def _apply_abs(self, code: int, value: int) -> None:
+        if code == ABS_X:
+            self._set_x(value)
+        elif code == ABS_Y:
+            self._set_y(value)
+        elif code == ABS_MT_SLOT:
+            self._mt_protocol = True
+            self._current_slot = value
+        elif code == ABS_MT_POSITION_X:
+            self._mt_protocol = True
+            if self._current_slot == 0:
+                self._set_x(value)
+        elif code == ABS_MT_POSITION_Y:
+            self._mt_protocol = True
+            if self._current_slot == 0:
+                self._set_y(value)
+        elif code == ABS_MT_TRACKING_ID:
+            self._mt_protocol = True
+            if self._current_slot == 0:
+                self._desired_pressed = value >= 0
+
+    def _set_x(self, value: int) -> None:
+        if value != self._raw_x:
+            self._raw_x = value
+            self._motion_dirty = True
+
+    def _set_y(self, value: int) -> None:
+        if value != self._raw_y:
+            self._raw_y = value
+            self._motion_dirty = True
+
     def _apply_button(self, value: int) -> None:
-        if value == 1 and not self._pressed:
-            pos = self.position()
+        # Type-B multitouch tracking IDs are more reliable than BTN_TOUCH on
+        # this USB-I2C bridge, whose BTN_TOUCH may briefly flicker between
+        # reports.  Before the first MT record, BTN_TOUCH remains a complete
+        # fallback for older single-touch panels.
+        if not self._mt_protocol:
+            self._desired_pressed = value != 0
+
+    def _flush_report(self) -> None:
+        """Publish one coherent Linux input frame to pygame.
+
+        Button records commonly precede the new coordinates.  Deferring the
+        press until SYN_REPORT prevents a new tap from inheriting the previous
+        tap's position and also collapses duplicate ABS/MT records.
+        """
+        pos = self.position()
+        if self._desired_pressed and not self._pressed:
             if pos is not None:
                 self._pressed = True
-                self._post(pygame.MOUSEMOTION, pos, (0, 0), (0, 0, 0))
+                rel = self._relative_to_last(pos)
+                self._post(pygame.MOUSEMOTION, pos, rel, (0, 0, 0))
                 self._post(pygame.MOUSEBUTTONDOWN, pos, None, (1, 0, 0))
-                self._motion_dirty = False
-        elif value == 0 and self._pressed:
+                self._last_posted_pos = pos
+        elif not self._desired_pressed and self._pressed:
             self._pressed = False
-            pos = self.position() or (0, 0)
-            self._post(pygame.MOUSEBUTTONUP, pos, None, (1, 0, 0))
+            release_pos = pos or self._last_posted_pos or (0, 0)
+            self._post(pygame.MOUSEBUTTONUP, release_pos, None, (0, 0, 0))
+            self._last_posted_pos = release_pos
+        elif (
+            self._pressed
+            and self._motion_dirty
+            and pos is not None
+            and pos != self._last_posted_pos
+        ):
+            self._post(
+                pygame.MOUSEMOTION,
+                pos,
+                self._relative_to_last(pos),
+                (1, 0, 0),
+            )
+            self._last_posted_pos = pos
+        self._motion_dirty = False
+
+    def _relative_to_last(self, pos: tuple[int, int]) -> tuple[int, int]:
+        if self._last_posted_pos is None:
+            return (0, 0)
+        return (pos[0] - self._last_posted_pos[0], pos[1] - self._last_posted_pos[1])
+
+    def _recover_dropped_report(self) -> None:
+        """Release a possibly stuck pointer after the kernel drops events."""
+        if self._pressed:
+            pos = self.position() or self._last_posted_pos or (0, 0)
+            self._post(pygame.MOUSEBUTTONUP, pos, None, (0, 0, 0))
+        self._pressed = False
+        self._desired_pressed = False
+        self._motion_dirty = False
+        self._current_slot = 0
 
     @staticmethod
     def _post(
