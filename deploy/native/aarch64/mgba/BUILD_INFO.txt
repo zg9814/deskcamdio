@@ -1,0 +1,9 @@
+mGBA ref:        0.10.5
+commit sha:      26b7884bc25a5933960f3cdcd98bac1ae14d42e2
+build host:      aarch64 / Debian GNU/Linux 13 (trixie)
+cmake flags:     BUILD_QT=OFF BUILD_SDL=ON BUILD_GBA=ON BUILD_GB=OFF
+                 BUILD_LIBRETRO=OFF BUILD_TEST=OFF USE_FFMPEG=OFF USE_LUA=OFF
+                 USE_DEBUGGERS=OFF
+binary sha256:   6a029695e45c2bddcd2cb32394a78a9980ad5c53be7b707d3eeec862166367a6
+lib sha256:      ef99a75c6fceb4b7b0b3adb10570460d1d6b29712b0a196c328110b4b728a6b5
+built at:        2026-08-23T05:49:24Z

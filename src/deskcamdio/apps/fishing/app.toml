@@ -1,0 +1,6 @@
+id = "fishing"
+name = "钓鱼"
+icon = "fish"
+order = 5
+api_version = 2
+entrypoint = "deskcamdio.apps.fishing.app:FishingApp"

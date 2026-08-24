@@ -1,0 +1,6 @@
+id = "camera"
+name = "相机"
+icon = "camera"
+order = 1
+api_version = 2
+entrypoint = "deskcamdio.apps.camera.app:CameraApp"

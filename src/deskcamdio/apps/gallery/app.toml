@@ -1,0 +1,6 @@
+id = "gallery"
+name = "相册"
+icon = "image"
+order = 2
+api_version = 2
+entrypoint = "deskcamdio.apps.gallery.app:GalleryApp"

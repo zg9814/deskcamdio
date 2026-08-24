@@ -1,0 +1,9 @@
+# Python 3.13 / Linux aarch64 release-only runtime artifacts.
+# evdev is installed from Debian's python3-evdev package and inherited through
+# the final-path venv's --system-site-packages setting.
+pygame-ce==2.5.8 \
+    --hash=sha256:e3183bc0d808e739ca2400df45a5bfae10704ccbcacab0f04f9adc9027e86427
+sherpa-onnx==1.13.6 \
+    --hash=sha256:248e3d039dba42ffeb141e7cb914f297e23199fca94e0413259dcdf5fb281960
+sherpa-onnx-core==1.13.6 \
+    --hash=sha256:e247b203ca64ab7095864d3ef1a21159787e02a985a7df137652604377c7833e

@@ -1,0 +1,6 @@
+id = "music"
+name = "音乐"
+icon = "note"
+order = 3
+api_version = 2
+entrypoint = "deskcamdio.apps.music.app:MusicApp"

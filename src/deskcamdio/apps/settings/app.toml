@@ -1,0 +1,6 @@
+id = "settings"
+name = "设置"
+icon = "gear"
+order = 8
+api_version = 2
+entrypoint = "deskcamdio.apps.settings.app:SettingsApp"

@@ -1,0 +1,6 @@
+id = "pomodoro"
+name = "番茄钟"
+icon = "timer"
+order = 7
+api_version = 2
+entrypoint = "deskcamdio.apps.pomodoro.app:PomodoroApp"

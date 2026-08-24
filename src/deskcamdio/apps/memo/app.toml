@@ -1,0 +1,6 @@
+id = "memo"
+name = "备忘"
+icon = "list"
+order = 6
+api_version = 2
+entrypoint = "deskcamdio.apps.memo.app:MemoApp"

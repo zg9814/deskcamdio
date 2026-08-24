@@ -1,0 +1,6 @@
+id = "launcher"
+name = "桌面"
+icon = "grid"
+order = 1
+api_version = 2
+entrypoint = "deskcamdio.apps.launcher.app:LauncherApp"

@@ -1,0 +1,37 @@
+[Unit]
+Description=DeskCamdio device runtime
+After=multi-user.target bluetooth.target bluealsa.service
+Wants=bluetooth.target
+# Kiosk: this service owns /dev/tty1 exclusively; getty must yield.
+Conflicts=getty@tty1.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+User=fish
+Group=fish
+SupplementaryGroups=video render input audio gpio bluetooth tty
+WorkingDirectory=/opt/deskcamdio/current
+Environment=DESKCAMDIO_PLATFORM=raspberry_pi
+Environment=SDL_VIDEODRIVER=kmsdrm
+Environment=SDL_AUDIODRIVER=alsa
+Environment=AUDIODEV=usb_output
+EnvironmentFile=-/etc/deskcamdio/device.env
+ExecStart=/opt/deskcamdio/current/venv/bin/deskcamdio-device
+Restart=always
+RestartSec=2
+WatchdogSec=20
+StandardInput=tty
+TTYPath=/dev/tty1
+StandardOutput=journal
+StandardError=journal
+RuntimeDirectory=deskcamdio
+RuntimeDirectoryMode=0755
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ReadWritePaths=/var/lib/deskcamdio /run/deskcamdio
+
+[Install]
+WantedBy=graphical.target

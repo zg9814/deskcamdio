@@ -1,0 +1,34 @@
+# Generated artifacts
+.venv/
+.runtime/
+.shot-data/
+.shot-run/
+*.egg-info/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+work/
+dist/
+build/
+.coverage
+coverage.xml
+htmlcov/
+*.log
+
+# Device/user content
+/photos/
+/roms/
+/music/
+/models/
+*.db
+*.db-shm
+*.db-wal
+
+# Local secrets / environment
+*.env
+!.env.example
+
+# OS noise
+Thumbs.db
+.DS_Store

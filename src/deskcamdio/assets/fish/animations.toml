@@ -1,0 +1,26 @@
+[sheet]
+frame_width = 64
+frame_height = 64
+frames_per_animation = 4
+animation_rows = 8
+color_columns = 4
+
+[animations.idle]
+row = 0
+fps = 6
+loop = true
+
+[animations.swim]
+row = 1
+fps = 8
+loop = true
+
+[animations.death]
+row = 6
+fps = 8
+loop = false
+
+[animations.attack]
+row = 7
+fps = 10
+loop = false

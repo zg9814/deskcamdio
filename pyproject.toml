@@ -1,0 +1,97 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deskcamdio"
+description = "Raspberry Pi Zero 2 W desktop AI and GBA handheld"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dynamic = ["version"]
+dependencies = [
+  "pygame-ce>=2.5.6,<3",
+  "httpx>=0.28,<1",
+  "pillow>=11,<13",
+  "evdev>=1.6,<3; platform_system == 'Linux'",
+  "sherpa-onnx==1.13.6; platform_system == 'Linux' and platform_machine == 'aarch64'",
+]
+
+[project.scripts]
+deskcamdio-device = "deskcamdio.cli.device:main"
+deskcamdio-camera-worker = "deskcamdio.cli.camera_worker:main"
+deskcamdio-photo-worker = "deskcamdio.cli.photo_worker:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.4",
+  "pytest-cov>=7",
+  "pytest-asyncio>=1.0",
+  "ruff>=0.13",
+  "mypy>=1.18",
+  "build>=1.2",
+  "setuptools>=77",
+  "wheel>=0.45",
+]
+
+[tool.setuptools.dynamic]
+version = { attr = "deskcamdio._version.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+deskcamdio = [
+  "apps/*/app.toml",
+  "assets/fonts/*.ttf",
+  "assets/fonts/*.txt",
+  "assets/sounds/*.wav",
+  "assets/fish/*.png",
+  "assets/fish/*.toml",
+  "assets/aquatic/*.png",
+  "assets/icons/*.png",
+  "assets/watermark/*.png",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C90"]
+ignore = ["E501"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.mypy]
+python_version = "3.13"
+files = ["src/deskcamdio"]
+disallow_untyped_defs = true
+no_implicit_optional = true
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = ["pygame.*", "evdev.*", "gpiozero.*", "picamera2.*", "simplejpeg.*", "sherpa_onnx.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+asyncio_mode = "auto"
+markers = [
+  "wheel: builds a wheel and inspects packaged assets (slower)",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["src/deskcamdio"]
+
+[tool.coverage.report]
+exclude_also = [
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+  'if __name__ == "__main__":',
+]

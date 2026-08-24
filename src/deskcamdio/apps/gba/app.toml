@@ -1,0 +1,6 @@
+id = "gba"
+name = "GBA"
+icon = "game"
+order = 4
+api_version = 2
+entrypoint = "deskcamdio.apps.gba.app:GbaApp"
