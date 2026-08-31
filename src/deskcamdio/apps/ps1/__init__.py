@@ -1,0 +1,1 @@
+"""PlayStation application package."""

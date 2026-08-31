@@ -16,6 +16,11 @@ async def test_rc2_frame_rates_voice_and_ec11(tmp_path: Path) -> None:
         assert runtime.manager is not None and runtime.voice_service is not None
         standby = runtime.manager._mounted["standby"].app
         assert runtime._effective_frame_rate() == 60
+        runtime.target_fps = 30
+        standby.preferred_fps = 60
+        assert runtime._effective_frame_rate() == 60
+        standby.preferred_fps = 0
+        assert runtime._effective_frame_rate() == 30
         standby.low_power = True
         assert runtime._effective_frame_rate() == 5
         standby.low_power = False
@@ -128,14 +133,17 @@ async def test_soft_sleep_quiesces_camera_and_fast_voice_cancel(tmp_path: Path) 
 
         class Session:
             stopped = 0
+            reason = ""
 
-            def stop(self) -> None:
+            def request_stop(self, reason: str) -> None:
                 self.stopped += 1
+                self.reason = reason
 
         session = Session()
         runtime.game_session = session
         runtime._on_hardware_input("controller_exit", 1)
         assert session.stopped == 1
+        assert session.reason == "controller"
         runtime.game_session = None
     finally:
         await runtime.shutdown()

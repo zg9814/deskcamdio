@@ -106,8 +106,11 @@ async def test_rom_upsert_and_touch(store) -> None:
     await store.upsert_rom({**record, "mtime_ns": 8})
     rows = await store.fetch_all("SELECT sha256, mtime_ns FROM gba_roms")
     assert rows == [("abc", 8)]
-    await store.touch_rom("abc")
-    played = await store.fetch_one("SELECT last_played_at FROM gba_roms WHERE sha256='abc'")
+    await store.upsert_rom({**record, "sha256": "def", "title": "REPLACED"})
+    rows = await store.fetch_all("SELECT sha256, path, title FROM gba_roms")
+    assert rows == [("def", record["path"], "REPLACED")]
+    await store.touch_rom("def")
+    played = await store.fetch_one("SELECT last_played_at FROM gba_roms WHERE sha256='def'")
     assert played is not None and played[0] is not None
 
 

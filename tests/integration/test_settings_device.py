@@ -25,7 +25,7 @@ async def test_device_panel_actions(harness) -> None:
     )
     settings.render(surface)  # build device hitboxes
 
-    assert settings._device_buttons["wifi_reconnect"] is not None
+    assert settings._device_buttons["wifi_scan"] is not None
 
     print("DBG page=", settings.page)
     print(
@@ -101,6 +101,49 @@ async def test_simulated_system_defaults() -> None:
     assert sysctl.brightness == 100
     assert sysctl.set_brightness(2) is True
     assert sysctl.brightness == 5
+    assert sysctl.wifi_scan()[0]["ssid"] == "SimNet"
+    assert sysctl.wifi_connect("Fish Guest") is True
+    assert sysctl.wifi_status()["ssid"] == "Fish Guest"
+
+
+async def test_wifi_configuration_uses_scan_and_password_keyboard(harness) -> None:
+    settings = await harness.open("settings")
+    settings.page = 2
+    surface = pygame.Surface((480, 480))
+    settings.render(surface)
+    settings.handle_input(
+        pygame.event.Event(
+            pygame.MOUSEBUTTONDOWN,
+            {"pos": settings._device_buttons["wifi_scan"].center},
+        )
+    )
+    await asyncio.sleep(0.05)
+    settings.render(surface)
+    assert settings._wifi_mode == "networks"
+    settings.handle_input(
+        pygame.event.Event(
+            pygame.MOUSEBUTTONDOWN,
+            {"pos": settings._wifi_buttons["network:0"].center},
+        )
+    )
+    settings.render(surface)
+    assert settings._wifi_mode == "password"
+    for char in "fishpass":
+        settings.handle_input(
+            pygame.event.Event(
+                pygame.MOUSEBUTTONDOWN,
+                {"pos": settings._wifi_buttons[f"key:{char}"].center},
+            )
+        )
+    settings.handle_input(
+        pygame.event.Event(
+            pygame.MOUSEBUTTONDOWN,
+            {"pos": settings._wifi_buttons["connect"].center},
+        )
+    )
+    await asyncio.sleep(0.05)
+    assert settings._wifi_mode == ""
+    assert harness.system.wifi_status()["ssid"] == "SimNet"
 
 
 async def test_volume_slider_syncs_system(harness) -> None:

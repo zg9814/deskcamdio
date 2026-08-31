@@ -253,6 +253,18 @@ class AppManager:
             mounted.faulty = True
             asyncio.get_running_loop().create_task(self._fallback(self.active_id))
 
+    def preferred_fps(self) -> int | None:
+        """Optional short-lived frame-rate request from the foreground app."""
+        mounted = self._mounted.get(self.active_id)
+        if mounted is None or mounted.faulty:
+            return None
+        value = getattr(mounted.app, "preferred_fps", None)
+        if callable(value):
+            value = value()
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            return None
+        return max(1, min(value, 60))
+
 
 __all__ = [
     "AppDescriptor",

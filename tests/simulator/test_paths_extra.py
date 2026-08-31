@@ -11,13 +11,7 @@ from pathlib import Path
 import pygame
 import pytest
 
-from deskcamdio.apps.fishing.economy import (
-    PlayerState,
-    bite_chance,
-    day_period,
-    fish_value,
-    roll_species,
-)
+from deskcamdio.apps.fishing.economy import PlayerState
 from deskcamdio.cli.camera_worker import CameraWorker, serve
 from deskcamdio.core.lifecycle import LeaveReason, RouteState
 from deskcamdio.services.camera_client import (
@@ -38,80 +32,31 @@ def _surface() -> pygame.Surface:
 # ---- fishing economy -------------------------------------------------------
 
 
-def test_day_period_boundaries() -> None:
-    assert day_period(None) in {"dawn", "day", "dusk", "night"}
-
-
-class FixedRandom:
-    def __init__(self, value: float) -> None:
-        self.value = value
-
-    def random(self) -> float:
-        return self.value
-
-    def uniform(self, _lo: float, _hi: float) -> float:
-        return 1.0
-
-
-def test_roll_species_night_prefers_eel() -> None:
-    assert roll_species("night", FixedRandom(0.0)) in {"eel", "carp"}
-    assert roll_species("dawn", FixedRandom(0.99)) in {"eel", "catfish"}
-
-
-def test_fish_value_period_multipliers() -> None:
-    base = fish_value("carp", 1.0, False, "day")
-    assert fish_value("carp", 1.0, False, "dusk") >= base
-    assert fish_value("carp", 1.0, False, "night") > base
-    assert fish_value("carp", 1.0, True, "day") == base * 5
-
-
-def test_bite_chance_clamped() -> None:
-    assert bite_chance(100, "dusk") > bite_chance(100, "day")
-    assert bite_chance(10, "day") < bite_chance(100, "day")
-    assert bite_chance(0, "dawn") >= 0.05
-
-
-def test_player_state_json_roundtrip() -> None:
-    player = PlayerState(coins=7, bait=3, cargo=[{"species": "koi", "weight": 1.0}])
-    restored = PlayerState.from_json(player.to_json())
-    assert restored.coins == 7 and restored.cargo[0]["species"] == "koi"
+def test_legacy_player_upgrades_and_energy_recovery() -> None:
+    player = PlayerState(coins=1_000, energy=90, last_energy_at=100.0)
+    old_capacity = player.capacity
+    assert player.upgrade("boat") is True
+    assert player.capacity > old_capacity
+    assert player.recover_energy(100.0 + 10 * 300) == 10
+    assert player.energy == 100
 
 
 # ---- world QTE branches -----------------------------------------------------
 
 
-async def test_world_qte_early_penalty() -> None:
-    from deskcamdio.apps.fishing.world import HookState, World
+def test_legacy_world_reel_and_land() -> None:
+    import random
 
-    world = World()
-    world.cast()
-    world.update(10.0)
-    assert world.hook_state is HookState.FIGHTING
-    world.qte_active = True
-    world.qte_ring_radius = 500.0  # outside window
-    result = world.reel()
-    assert result == "qte-early"
-    world.progress = 0.99
-    world.reel()
-    assert world.hook_state is HookState.LANDED
+    from deskcamdio.apps.fishing.world import FishingWorld
 
-    world.hook_state = HookState.IDLE
-    world.update(5.0)  # still idle; no crash
-    assert world.hook_state is HookState.IDLE
-
-
-async def test_world_escape_when_progress_zero(harness_like=None) -> None:
-    from deskcamdio.apps.fishing.world import HookState, World
-
-    world = World()
-    world.cast()
-    world.update(10.0)
-    world.progress = 0.05
-    for _ in range(60):
-        world.update(0.2)
-        if world.hook_state is HookState.ESCAPED:
-            break
-    assert world.hook_state is HookState.ESCAPED
+    world = FishingWorld(random.Random(4), fish_count=1)
+    fish = world.fish[0]
+    fish.state = "bite"
+    fish.bite_deadline = 10.0
+    assert world.begin_reel().status == "started"
+    result = world.land_reeling()
+    assert result.status == "caught"
+    assert len(world.fish) == 1
 
 
 # ---- camera app paths --------------------------------------------------------
@@ -194,6 +139,10 @@ async def test_launcher_swipe_and_launch(harness_maker) -> None:
     launcher.handle_input(
         pygame.event.Event(pygame.MOUSEBUTTONUP, {"button": 1, "pos": (300, 200)})
     )
+    assert launcher.pager.is_animating and launcher.page == 1
+    launcher.update(0.1)
+    assert 0 < launcher.pager.offset < 480
+    launcher.update(0.3)
     assert launcher.page == 0
 
 
@@ -277,8 +226,46 @@ async def test_gba_lists_roms_from_store(harness_maker) -> None:
     gba = await harness.open("gba")
     gba.render(_surface())
     rect = gba._rows["ff"]
-    gba.handle_input(pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": rect.center}))
+    gba.handle_input(pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": rect.center, "button": 1}))
+    gba.handle_input(pygame.event.Event(pygame.MOUSEBUTTONUP, {"pos": rect.center, "button": 1}))
     assert events and events[0]["sha256"] == "ff"
+
+
+async def test_gba_paginates_with_buttons_and_swipes(harness_maker) -> None:
+    harness = await harness_maker()
+    for index in range(8):
+        await harness.store.upsert_rom(
+            {
+                "sha256": f"sha-{index}",
+                "path": f"/roms/game-{index}.gba",
+                "title": f"game-{index}",
+                "game_code": f"G{index:03}",
+                "size_bytes": 1024,
+                "mtime_ns": index,
+            }
+        )
+    gba = await harness.open("gba")
+    gba.render(_surface())
+    assert gba.page == 0 and len(gba._rows) == 5
+
+    next_pos = gba._page_buttons["next"].center
+    gba.handle_input(pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": next_pos, "button": 1}))
+    gba.handle_input(pygame.event.Event(pygame.MOUSEBUTTONUP, {"pos": next_pos, "button": 1}))
+    assert gba.pager.is_animating and gba.page == 0
+    gba.update(0.1)
+    assert -480 < gba.pager.offset < 0
+    gba.update(0.3)
+    gba.render(_surface())
+    assert gba.page == 1 and len(gba._rows) == 3
+
+    gba.handle_input(pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": (300, 200), "button": 1}))
+    gba.handle_input(
+        pygame.event.Event(pygame.MOUSEMOTION, {"pos": (390, 202), "buttons": (1, 0, 0)})
+    )
+    gba.handle_input(pygame.event.Event(pygame.MOUSEBUTTONUP, {"pos": (390, 202), "button": 1}))
+    gba.update(0.3)
+    gba.render(_surface())
+    assert gba.page == 0 and len(gba._rows) == 5
 
 
 # ---- worker serve over injected socket + client fallbacks -----------------------

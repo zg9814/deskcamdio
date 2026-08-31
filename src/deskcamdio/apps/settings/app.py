@@ -89,6 +89,13 @@ class SettingsApp(App):
         self._device_refreshed_at = float("-inf")
         self._device_busy = ""
         self._bt_candidates: list[dict[str, Any]] = []
+        self._wifi_candidates: list[dict[str, Any]] = []
+        self._wifi_mode = ""
+        self._wifi_selected: dict[str, Any] | None = None
+        self._wifi_password = ""
+        self._wifi_uppercase = False
+        self._wifi_symbols = False
+        self._wifi_buttons: dict[str, pygame.Rect] = {}
 
     def _spawn(self, coro: Any, *, name: str | None = None) -> Any:
         """Schedule work on this app's TaskScope; returns the Task."""
@@ -147,9 +154,22 @@ class SettingsApp(App):
 
     def handle_input(self, event: pygame.event.Event) -> None:
         context = self._context
-        if context is None or event.type != pygame.MOUSEBUTTONDOWN:
+        if context is None:
             return
-        pos = event.pos
+        if self._wifi_mode:
+            self._handle_wifi_input(event, context)
+            return
+        if event.type != pygame.MOUSEBUTTONDOWN:
+            return
+        self._handle_settings_click(event.pos, context)
+
+    def _handle_wifi_input(self, event: pygame.event.Event, context: RuntimeContext) -> None:
+        if event.type == pygame.KEYDOWN:
+            self._wifi_key_input(event, context)
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            self._wifi_modal_click(event.pos, context)
+
+    def _handle_settings_click(self, pos: tuple[int, int], context: RuntimeContext) -> None:
         for name, rect in self._tabs.items():
             if rect.collidepoint(pos):
                 self.page = TABS.index(name)
@@ -197,11 +217,62 @@ class SettingsApp(App):
             self._device_busy = hit_key
             self._spawn(self._run_device_action(hit_key, system, context), name=hit_key)
 
+    def _wifi_modal_click(self, pos: tuple[int, int], context: RuntimeContext) -> None:
+        hit = next((key for key, rect in self._wifi_buttons.items() if rect.collidepoint(pos)), "")
+        if hit == "cancel":
+            self._wifi_mode = ""
+            self._wifi_password = ""
+        elif hit == "rescan" and not self._device_busy:
+            self._device_busy = "wifi_scan"
+            self._spawn(self._run_device_action("wifi_scan", context.system, context))
+        elif hit.startswith("network:"):
+            index = int(hit.split(":", 1)[1])
+            if index >= len(self._wifi_candidates):
+                return
+            self._wifi_selected = self._wifi_candidates[index]
+            if str(self._wifi_selected.get("security", "")):
+                self._wifi_mode = "password"
+                self._wifi_password = ""
+            else:
+                self._start_wifi_connect(context)
+        else:
+            self._edit_wifi_password(hit, context)
+
+    def _edit_wifi_password(self, hit: str, context: RuntimeContext) -> None:
+        if hit == "backspace":
+            self._wifi_password = self._wifi_password[:-1]
+        elif hit == "case":
+            self._wifi_uppercase = not self._wifi_uppercase
+            self._wifi_symbols = False
+        elif hit == "symbols":
+            self._wifi_symbols = not self._wifi_symbols
+        elif hit == "space" and len(self._wifi_password) < 63:
+            self._wifi_password += " "
+        elif hit == "connect":
+            self._start_wifi_connect(context)
+        elif hit.startswith("key:") and len(self._wifi_password) < 63:
+            self._wifi_password += hit.split(":", 1)[1]
+
+    def _wifi_key_input(self, event: pygame.event.Event, context: RuntimeContext) -> None:
+        if event.key == pygame.K_ESCAPE:
+            self._wifi_mode = ""
+        elif event.key == pygame.K_BACKSPACE:
+            self._wifi_password = self._wifi_password[:-1]
+        elif event.key in {pygame.K_RETURN, pygame.K_KP_ENTER}:
+            self._start_wifi_connect(context)
+        elif event.unicode and event.unicode.isprintable() and len(self._wifi_password) < 63:
+            self._wifi_password += event.unicode
+
+    def _start_wifi_connect(self, context: RuntimeContext) -> None:
+        if self._wifi_selected is None or self._device_busy:
+            return
+        self._device_busy = "wifi_connect"
+        self._spawn(self._run_device_action("wifi_connect", context.system, context))
+
     async def _run_device_action(self, key: str, system: Any, context: RuntimeContext) -> None:
         try:
-            if key == "wifi_reconnect":
-                ok = await asyncio.to_thread(system.wifi_reconnect)
-                self.show_toast_local("Wi-Fi 已重连" if ok else "重连失败")
+            if key.startswith("wifi_"):
+                await self._run_wifi_action(key, system)
             elif key == "bt_toggle":
                 powered = await asyncio.to_thread(system.bluetooth_toggle)
                 self.show_toast_local("蓝牙已开" if powered else "蓝牙已关")
@@ -231,6 +302,31 @@ class SettingsApp(App):
         finally:
             self._device_busy = ""
 
+    async def _run_wifi_action(self, key: str, system: Any) -> None:
+        if key == "wifi_reconnect":
+            ok = await asyncio.to_thread(system.wifi_reconnect)
+            self.show_toast_local("Wi-Fi 已重连" if ok else "重连失败")
+        elif key == "wifi_scan":
+            self.show_toast_local("正在扫描 Wi-Fi…")
+            self._wifi_candidates = await asyncio.to_thread(system.wifi_scan)
+            self._wifi_mode = "networks"
+            self.show_toast_local(
+                f"发现 {len(self._wifi_candidates)} 个网络"
+                if self._wifi_candidates
+                else "没有发现 Wi-Fi"
+            )
+        elif key == "wifi_connect":
+            selected = self._wifi_selected or {}
+            ssid = str(selected.get("ssid", ""))
+            password = self._wifi_password
+            ok = await asyncio.to_thread(system.wifi_connect, ssid, password)
+            self._wifi_password = ""
+            if ok:
+                self._wifi_mode = ""
+                self.show_toast_local(f"已连接 {ssid}")
+            else:
+                self.show_toast_local("连接失败，请检查密码")
+
     _toast_text = ""
     _toast_until = 0.0
 
@@ -252,6 +348,9 @@ class SettingsApp(App):
         assert self._context is not None
         theme = self._context.theme.tokens
         renderer.background(surface, theme)
+        if self._wifi_mode:
+            self._render_wifi_modal(surface, theme)
+            return
         title = render_text("设置", 20, theme.text_primary, bold=True)
         surface.blit(title, (16, 12))
 
@@ -324,10 +423,8 @@ class SettingsApp(App):
         self._device_buttons.clear()
         wifi_text = "已连接 " + str(wifi.get("ssid", "")) if wifi.get("connected") else "未连接"
         components.row(surface, pygame.Rect(20, 146, 440, 48), f"Wi-Fi：{wifi_text}", theme)
-        self._device_buttons["wifi_reconnect"] = pygame.Rect(330, 146, 126, 48)
-        components.ghost_button(
-            surface, self._device_buttons["wifi_reconnect"], "重连", theme, size=14
-        )
+        self._device_buttons["wifi_scan"] = pygame.Rect(330, 146, 126, 48)
+        components.ghost_button(surface, self._device_buttons["wifi_scan"], "配置", theme, size=14)
 
         bt_label = "蓝牙：开" if bt.get("powered") else "蓝牙：关"
         components.row(surface, pygame.Rect(20, 200, 440, 48), bt_label, theme)
@@ -419,6 +516,59 @@ class SettingsApp(App):
                 trailing=value,
                 size=17,
             )
+
+    def _render_wifi_modal(self, surface: pygame.Surface, theme: ThemeTokens) -> None:
+        self._wifi_buttons.clear()
+        title = "选择 Wi-Fi" if self._wifi_mode == "networks" else "输入 Wi-Fi 密码"
+        surface.blit(render_text(title, 22, theme.text_primary, bold=True), (22, 38))
+        cancel = pygame.Rect(374, 30, 84, 48)
+        self._wifi_buttons["cancel"] = cancel
+        components.ghost_button(surface, cancel, "取消", theme, size=15)
+        if self._wifi_mode == "networks":
+            for index, network in enumerate(self._wifi_candidates[:6]):
+                rect = pygame.Rect(20, 88 + index * 54, 440, 48)
+                ssid = str(network.get("ssid", ""))[:24]
+                security = "加密" if network.get("security") else "开放"
+                trailing = f"{int(network.get('signal', 0))}% · {security}"
+                components.row(surface, rect, ssid, theme, trailing=trailing, size=17)
+                self._wifi_buttons[f"network:{index}"] = rect
+            rescan = pygame.Rect(160, 420, 160, 48)
+            self._wifi_buttons["rescan"] = rescan
+            components.ghost_button(surface, rescan, "重新扫描", theme, size=16)
+            return
+
+        ssid = str((self._wifi_selected or {}).get("ssid", ""))
+        surface.blit(render_text(ssid[:28], 16, theme.text_secondary), (24, 82))
+        password_box = pygame.Rect(22, 108, 436, 48)
+        pygame.draw.rect(surface, theme.surface_elevated, password_box, border_radius=12)
+        masked = "•" * min(24, len(self._wifi_password))
+        surface.blit(render_text(masked or "至少 8 位密码", 17, theme.text_primary), (38, 122))
+
+        rows = (
+            ("!@#$%^&*()", "_-+=[]{}", ";:'\",.<>", "?/\\|~`")
+            if self._wifi_symbols
+            else ("1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm")
+        )
+        for row_index, raw_row in enumerate(rows):
+            row = raw_row.upper() if self._wifi_uppercase else raw_row
+            key_width = 40 if len(row) >= 10 else 44
+            total = len(row) * key_width
+            start_x = (480 - total) // 2
+            y = 172 + row_index * 52
+            for column, char in enumerate(row):
+                rect = pygame.Rect(start_x + column * key_width + 2, y, key_width - 4, 46)
+                self._wifi_buttons[f"key:{char}"] = rect
+                components.ghost_button(surface, rect, char, theme, size=15)
+        controls = (
+            ("case", "Aa", pygame.Rect(12, 382, 58, 48)),
+            ("symbols", "符号", pygame.Rect(76, 382, 78, 48)),
+            ("backspace", "删除", pygame.Rect(160, 382, 76, 48)),
+            ("space", "空格", pygame.Rect(242, 382, 76, 48)),
+            ("connect", "连接", pygame.Rect(330, 382, 128, 48)),
+        )
+        for key, label, rect in controls:
+            self._wifi_buttons[key] = rect
+            components.ghost_button(surface, rect, label, theme, size=16)
 
     async def leave(self, reason: LeaveReason) -> None:
         del reason

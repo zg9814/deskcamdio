@@ -19,6 +19,12 @@ class SystemControlBase:
     def wifi_reconnect(self) -> bool:
         raise NotImplementedError
 
+    def wifi_scan(self) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    def wifi_connect(self, ssid: str, password: str = "") -> bool:
+        raise NotImplementedError
+
     def bluetooth_status(self) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -31,7 +37,13 @@ class SystemControlBase:
     def bluetooth_connect_controller(self, address: str) -> bool:
         raise NotImplementedError
 
+    def controller_connected(self) -> bool:
+        raise NotImplementedError
+
     def get_brightness(self) -> int:
+        raise NotImplementedError
+
+    def has_hardware_brightness(self) -> bool:
         raise NotImplementedError
 
     def set_brightness(self, percent: int) -> bool:
@@ -73,6 +85,19 @@ class SimulatedSystem(SystemControlBase):
         self.wifi["connected"] = True
         return True
 
+    def wifi_scan(self) -> list[dict[str, Any]]:
+        return [
+            {"ssid": "SimNet", "signal": 88, "security": "WPA2"},
+            {"ssid": "Fish Guest", "signal": 61, "security": ""},
+        ]
+
+    def wifi_connect(self, ssid: str, password: str = "") -> bool:
+        del password
+        if not ssid or not any(item["ssid"] == ssid for item in self.wifi_scan()):
+            return False
+        self.wifi.update({"connected": True, "ssid": ssid, "ip": "10.0.0.2"})
+        return True
+
     def bluetooth_status(self) -> dict[str, Any]:
         return dict(self.bluetooth)
 
@@ -92,8 +117,14 @@ class SimulatedSystem(SystemControlBase):
                 return True
         return False
 
+    def controller_connected(self) -> bool:
+        return any(bool(item.get("connected")) for item in self.controllers)
+
     def get_brightness(self) -> int:
         return self.brightness
+
+    def has_hardware_brightness(self) -> bool:
+        return True
 
     def set_brightness(self, percent: int) -> bool:
         self.brightness = max(5, min(100, int(percent)))
@@ -138,6 +169,57 @@ class RaspberryPiSystem(SystemControlBase):
         first = out2.splitlines()[0]
         rc3, _ = _run(["nmcli", "connection", "up", first])
         return rc3 == 0
+
+    def wifi_scan(self) -> list[dict[str, Any]]:
+        if _which("nmcli") is None:
+            return []
+        rc, out = _run(
+            [
+                "nmcli",
+                "-t",
+                "--escape",
+                "yes",
+                "-f",
+                "SSID,SIGNAL,SECURITY",
+                "device",
+                "wifi",
+                "list",
+                "--rescan",
+                "yes",
+                "ifname",
+                "wlan0",
+            ],
+            timeout=15.0,
+        )
+        if rc != 0:
+            return []
+        networks: dict[str, dict[str, Any]] = {}
+        for line in out.splitlines():
+            fields = re.split(r"(?<!\\):", line, maxsplit=2)
+            if len(fields) != 3:
+                continue
+            ssid = fields[0].replace(r"\:", ":").replace(r"\\", "\\").strip()
+            if not ssid:
+                continue
+            try:
+                signal = max(0, min(100, int(fields[1])))
+            except ValueError:
+                signal = 0
+            item = {"ssid": ssid, "signal": signal, "security": fields[2].strip("-")}
+            previous = networks.get(ssid)
+            if previous is None or signal > int(previous["signal"]):
+                networks[ssid] = item
+        return sorted(networks.values(), key=lambda item: int(item["signal"]), reverse=True)[:8]
+
+    def wifi_connect(self, ssid: str, password: str = "") -> bool:
+        if _which("nmcli") is None or not ssid or len(ssid) > 32 or "\x00" in ssid:
+            return False
+        command = ["nmcli", "--wait", "20", "device", "wifi", "connect", ssid]
+        if password:
+            command.extend(["password", password])
+        command.extend(["ifname", "wlan0"])
+        rc, _out = _run(command, timeout=25.0)
+        return rc == 0
 
     # ---- Bluetooth ---------------------------------------------------------
 
@@ -207,6 +289,12 @@ class RaspberryPiSystem(SystemControlBase):
         connect_rc, _ = _run([bluetoothctl, "connect", address], timeout=12.0)
         return connect_rc == 0
 
+    def controller_connected(self) -> bool:
+        if list(Path("/dev/input").glob("js*")):
+            return True
+        by_id = Path("/dev/input/by-id")
+        return by_id.is_dir() and any(by_id.glob("*-event-joystick"))
+
     # ---- Brightness ----------------------------------------------------------
 
     def _backlight_file(self) -> Path | None:
@@ -231,6 +319,9 @@ class RaspberryPiSystem(SystemControlBase):
             return round(cur * 100 / mx)
         except (OSError, ValueError, ZeroDivisionError):
             return 80
+
+    def has_hardware_brightness(self) -> bool:
+        return self._backlight_file() is not None
 
     def set_brightness(self, percent: int) -> bool:
         bl = self._backlight_file()

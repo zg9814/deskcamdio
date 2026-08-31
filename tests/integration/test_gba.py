@@ -104,7 +104,7 @@ def test_index_directory_dedupes_and_rejects(tmp_path: Path) -> None:
 
     first, second = asyncio.run(scenario())
     # Re-index the same file: hash dedupe keeps one entry per unique ROM.
-    records = [r for r in store.records.values() if r["title"] == "GOODGAME"]
+    records = [r for r in store.records.values() if r["title"] == "Good"]
     assert first >= 1 and second == 0
     assert len(records) == 1
 
@@ -120,7 +120,27 @@ class _FakeStore:
         ]
 
     async def upsert_rom(self, record: dict) -> None:
+        for digest, existing in list(self.records.items()):
+            if existing["path"] == record["path"] and digest != record["sha256"]:
+                self.records.pop(digest)
         self.records[record["sha256"]] = record
+
+
+def test_index_replaces_stale_record_for_same_path(tmp_path: Path) -> None:
+    import asyncio
+    import os
+
+    store = _FakeStore()
+    path = make_gba(tmp_path / "replace.gba", title="OLDGAME")
+    assert asyncio.run(index_directory(tmp_path, store)) == 1
+    old_digest = next(iter(store.records))
+
+    make_gba(path, title="NEWGAME")
+    os.utime(path, ns=(2_000_000, 2_000_000))
+    assert asyncio.run(index_directory(tmp_path, store)) == 1
+    assert len(store.records) == 1
+    assert old_digest not in store.records
+    assert next(iter(store.records.values()))["title"] == "replace"
 
 
 def test_generate_cover_is_local_png(tmp_path: Path) -> None:
@@ -191,6 +211,7 @@ def stub_mgba(tmp_path: Path) -> Path:
                 ".",
             )
             open(f"{sav_dir}/game.sav", "wb").write(b"SAVEDATA")
+            open(f"{sav_dir}/argv.txt", "w", encoding="utf-8").write("\\n".join(sys.argv))
             signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
             while True:
                 time.sleep(60)
@@ -224,6 +245,10 @@ def test_game_session_full_lifecycle(tmp_path: Path, stub_mgba: Path) -> None:
     session.request_stop("test")
     sav_dir = next((tmp_path / "saves").iterdir())
     assert (sav_dir / "game.sav").exists()
+    argv = (sav_dir / "argv.txt").read_text(encoding="utf-8")
+    assert "lockAspectRatio=1" in argv
+    assert "lockIntegerScaling=1" in argv
+    assert "-f" in argv.splitlines()
     assert exits and exits[-1] == "test"
 
 
@@ -319,7 +344,7 @@ def test_shoulder_combo_requires_full_hold(tmp_path: Path) -> None:
 
     # Simulate the combo staying held past COMBO_HOLD_SECONDS.
     monitor.held_since -= COMBO_HOLD_SECONDS + 0.5
-    monitor._update_combo(held, "R2", 1)
+    monitor._check_combo_hold(held)
     assert monitor.stop_flag.is_set()  # exit requested
 
     # Releasing any button resets the hold timer.
@@ -330,3 +355,59 @@ def test_shoulder_combo_requires_full_hold(tmp_path: Path) -> None:
     monitor._update_combo(held, "L2", 1)
     assert monitor.held_since is not None
     assert not monitor.stop_flag.is_set()  # fresh hold restarts the window
+
+
+def test_controller_monitor_decodes_xinput_keys_and_analog_triggers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeCodes:
+        EV_KEY = 1
+        EV_ABS = 3
+        bytype = {
+            EV_KEY: {310: "BTN_TL", 311: "BTN_TR"},
+            EV_ABS: {2: "ABS_Z", 5: "ABS_RZ"},
+        }
+
+    class FakeEvdev:
+        ecodes = FakeCodes
+
+    class Event:
+        def __init__(self, event_type: int, code: int, value: int) -> None:
+            self.type = event_type
+            self.code = code
+            self.value = value
+
+    class AbsInfo:
+        min = 0
+        max = 255
+
+    class Device:
+        @staticmethod
+        def absinfo(_code: int) -> AbsInfo:
+            return AbsInfo()
+
+    monkeypatch.setitem(sys.modules, "evdev", FakeEvdev())
+    rom = make_gba(tmp_path / "controller.gba")
+    monitor = ControllerMonitor(GameSession(Path("mgba"), rom, tmp_path / "saves"))
+
+    assert monitor._control_of(Event(1, 310, 1)) == ("L1", 1)
+    assert monitor._control_of(Event(1, 311, 0)) == ("R1", 0)
+    assert monitor._control_of(Event(3, 2, 80), Device()) == ("L2", 0)
+    assert monitor._control_of(Event(3, 2, 200), Device()) == ("L2", 1)
+    assert monitor._control_of(Event(3, 5, 200), Device()) == ("R2", 1)
+    assert monitor._control_of(Event(3, 0, 200), Device()) is None
+
+
+def test_game_session_writes_private_controller_bindings(tmp_path: Path, stub_mgba: Path) -> None:
+    rom = make_gba(tmp_path / "mapped.gba")
+    session = make_session(stub_mgba, tmp_path, rom)
+    session.start()
+    try:
+        config = session.saves_dir / ".config" / "mgba" / "config.ini"
+        text = config.read_text(encoding="utf-8")
+        assert "[gba.input.SDLB]" in text
+        assert "keyA=1" in text
+        assert "keyStart=7" in text
+    finally:
+        session.request_stop("cleanup")

@@ -286,22 +286,31 @@ class StateStore:
         )
 
     async def upsert_rom(self, record: dict[str, Any]) -> None:
-        await self.execute(
-            "INSERT INTO gba_roms (sha256, path, title, game_code, size_bytes, mtime_ns,"
-            " last_played_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-            " ON CONFLICT(sha256) DO UPDATE SET path = excluded.path,"
-            " mtime_ns = excluded.mtime_ns",
-            (
-                record["sha256"],
-                record["path"],
-                record["title"],
-                record["game_code"],
-                record["size_bytes"],
-                record["mtime_ns"],
-                record.get("last_played_at"),
-            ),
-            topic="gba.changed",
+        values = (
+            record["sha256"],
+            record["path"],
+            record["title"],
+            record["game_code"],
+            record["size_bytes"],
+            record["mtime_ns"],
+            record.get("last_played_at"),
         )
+
+        def operation(conn: sqlite3.Connection) -> None:
+            with conn:
+                conn.execute(
+                    "DELETE FROM gba_roms WHERE path = ? AND sha256 <> ?",
+                    (record["path"], record["sha256"]),
+                )
+                conn.execute(
+                    "INSERT INTO gba_roms (sha256, path, title, game_code, size_bytes,"
+                    " mtime_ns, last_played_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+                    " ON CONFLICT(sha256) DO UPDATE SET path = excluded.path,"
+                    " mtime_ns = excluded.mtime_ns",
+                    values,
+                )
+
+        await self._submit(operation, topic="gba.changed")
 
     async def touch_rom(self, sha256: str) -> None:
         await self.execute(

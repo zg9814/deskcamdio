@@ -20,6 +20,21 @@ GRACEFUL_EXIT_SECONDS = 3.0
 KILL_AFTER_SECONDS = 1.0
 SHOULDER_COMBO = {"L1", "R1", "L2", "R2"}
 COMBO_HOLD_SECONDS = 1.0
+TRIGGER_PRESS_FRACTION = 0.55
+
+_MGBA_CONTROLLER_CONFIG = """\
+[gba.input.SDLB]
+keyA=1
+keyB=0
+keyL=4
+keyR=5
+keySelect=6
+keyStart=7
+hat0Up=6
+hat0Right=4
+hat0Down=7
+hat0Left=5
+"""
 
 
 class GameSession:
@@ -58,6 +73,14 @@ class GameSession:
         if self.controller_config:
             env["SDL_GAMECONTROLLERCONFIG"] = self.controller_config
         self.saves_dir.mkdir(parents=True, exist_ok=True)
+        # The SDL frontend only provides default directional bindings.  Keep
+        # a private mGBA config so standard XInput/SDL pads also get all GBA
+        # face/shoulder/start/select buttons without touching the user's home.
+        config_root = self.saves_dir / ".config"
+        config_dir = config_root / "mgba"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        (config_dir / "config.ini").write_text(_MGBA_CONTROLLER_CONFIG, encoding="utf-8")
+        env["XDG_CONFIG_HOME"] = str(config_root)
         started = time.monotonic()
         # mGBA CLI (mgba.6): -C overrides config keys; general.savegamePath
         # routes .sav files into the per-ROM directory. cwd is also pinned so
@@ -68,6 +91,11 @@ class GameSession:
                 str(self.mgba_binary),
                 "-C",
                 f"general.savegamePath={self.saves_dir}",
+                "-C",
+                "lockAspectRatio=1",
+                "-C",
+                "lockIntegerScaling=1",
+                "-f",
                 str(self.rom_path),
             ],
             stdout=subprocess.DEVNULL,
@@ -155,28 +183,47 @@ class ControllerMonitor:
         self._thread.start()
 
     @staticmethod
-    def _button_of(event: Any) -> str | None:
+    def _event_name(evdev: Any, event: Any) -> str:
+        names = evdev.ecodes.bytype.get(event.type, {}).get(event.code, "")
+        if isinstance(names, (list, tuple)):
+            return next((str(name) for name in names if str(name).startswith(("BTN_", "ABS_"))), "")
+        return str(names)
+
+    @classmethod
+    def _control_of(cls, event: Any, device: Any = None) -> tuple[str, int] | None:
         import evdev
 
-        if event.type != evdev.ecodes.EV_KEY:
+        name = cls._event_name(evdev, event)
+        if event.type == evdev.ecodes.EV_KEY:
+            button = {
+                "KEY_LEFTSHOULDER": "L1",
+                "KEY_RIGHTSHOULDER": "R1",
+                "KEY_LEFTTRIGGER": "L2",
+                "KEY_RIGHTTRIGGER": "R2",
+                "BTN_TL": "L1",
+                "BTN_TR": "R1",
+                "BTN_TL2": "L2",
+                "BTN_TR2": "R2",
+            }.get(name)
+            return (button, int(event.value != 0)) if button else None
+        if event.type != evdev.ecodes.EV_ABS or name not in {"ABS_Z", "ABS_RZ"}:
             return None
-        name = {**evdev.ecodes.KEY}.get(event.code, "")
-        return {
-            "KEY_LEFTSHOULDER": "L1",
-            "KEY_RIGHTSHOULDER": "R1",
-            "KEY_LEFTTRIGGER": "L2",
-            "KEY_RIGHTTRIGGER": "R2",
-            "BTN_TL": "L1",
-            "BTN_TR": "R1",
-            "BTN_TL2": "L2",
-            "BTN_TR2": "R2",
-        }.get(name)
+        minimum, maximum = 0, 255
+        if device is not None:
+            with contextlib.suppress(OSError):
+                info = device.absinfo(event.code)
+                minimum, maximum = int(info.min), int(info.max)
+        threshold = minimum + (maximum - minimum) * TRIGGER_PRESS_FRACTION
+        return ("L2" if name == "ABS_Z" else "R2", int(event.value >= threshold))
 
     def _update_combo(self, held: set[str], button: str, value: int) -> None:
         if value == 1:
             held.add(button)
         elif value == 0:
             held.discard(button)
+        self._check_combo_hold(held)
+
+    def _check_combo_hold(self, held: set[str]) -> None:
         now = time.monotonic()
         if held == SHOULDER_COMBO:
             if self.held_since is None:
@@ -218,12 +265,18 @@ class ControllerMonitor:
                 try:
                     events = device.read()
                 except OSError:
-                    devices.pop(fd, None)
+                    removed = devices.pop(fd, None)
+                    if removed is not None:
+                        with contextlib.suppress(OSError):
+                            removed.close()
                     continue
                 for event in events:
-                    button = self._button_of(event)
-                    if button is not None:
-                        self._update_combo(held, button, event.value)
+                    control = self._control_of(event, device)
+                    if control is not None:
+                        self._update_combo(held, *control)
+            # Triggers and shoulder buttons do not generate repeat events.
+            # Evaluate elapsed hold time on every poll, even when input is idle.
+            self._check_combo_hold(held)
 
     def stop(self) -> None:
         self.stop_flag.set()

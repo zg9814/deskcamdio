@@ -63,8 +63,20 @@ async def main() -> None:
     launcher_host = runtime.manager._mounted["launcher"]  # noqa: SLF001
     launcher_host.app.page = 1  # type: ignore[union-attr]
     await snap("launcher-page2")
+    launcher_host.app.page = 2  # type: ignore[union-attr]
+    await snap("launcher-page3")
 
-    for app_id in ("camera", "gallery", "music", "gba", "fishing", "memo", "pomodoro", "settings"):
+    for app_id in (
+        "camera",
+        "gallery",
+        "music",
+        "gba",
+        "ps1",
+        "fishing",
+        "memo",
+        "pomodoro",
+        "settings",
+    ):
         await enter(app_id)
         await asyncio.sleep(0.15)
         await snap(f"app-{app_id}")
@@ -84,8 +96,17 @@ async def main() -> None:
     await snap("state-long-lyrics")
 
     await enter("fishing")
-    runtime.manager._mounted["fishing"].app.modal = "shop"  # noqa: SLF001
+    from deskcamdio.apps.fishing.app import GameModal
+
+    runtime.manager._mounted["fishing"].app.modal = GameModal(  # noqa: SLF001
+        "鱼跑了！", "收线太慢，鱼挣脱了", 1.2, (222, 148, 34)
+    )
     await snap("state-dialog")
+    fishing = runtime.manager._mounted["fishing"].app  # noqa: SLF001
+    fishing.modal = None
+    fishing._start_trip()  # noqa: SLF001
+    fishing.update(0.5)
+    await snap("state-fishing-sea")
 
     await enter("pomodoro")
     runtime.manager._mounted["pomodoro"].app.running = True  # noqa: SLF001

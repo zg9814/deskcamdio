@@ -51,6 +51,48 @@ def test_wifi_reconnect_activates_first_connection(pi: RaspberryPiSystem) -> Non
     assert pi.wifi_reconnect() is True
 
 
+def test_wifi_scan_deduplicates_and_connect_does_not_log_password(
+    pi: RaspberryPiSystem,
+) -> None:
+    scan_command = (
+        "nmcli",
+        "-t",
+        "--escape",
+        "yes",
+        "-f",
+        "SSID,SIGNAL,SECURITY",
+        "device",
+        "wifi",
+        "list",
+        "--rescan",
+        "yes",
+        "ifname",
+        "wlan0",
+    )
+    pi.responses[scan_command] = (
+        0,
+        "Home\\:5G:92:WPA2\nGuest:55:--\nHome\\:5G:64:WPA2",
+    )
+    assert pi.wifi_scan() == [
+        {"ssid": "Home:5G", "signal": 92, "security": "WPA2"},
+        {"ssid": "Guest", "signal": 55, "security": ""},
+    ]
+    assert pi.wifi_connect("Home:5G", "private-pass") is True
+    assert pi.calls[-1] == [
+        "nmcli",
+        "--wait",
+        "20",
+        "device",
+        "wifi",
+        "connect",
+        "Home:5G",
+        "password",
+        "private-pass",
+        "ifname",
+        "wlan0",
+    ]
+
+
 def test_bluetooth_status_parses_flags(pi: RaspberryPiSystem) -> None:
     pi.responses[("bluetoothctl", "show")] = (
         0,
@@ -132,4 +174,5 @@ def test_brightness_without_backlight_returns_false(
 ) -> None:
     monkeypatch.setattr(RaspberryPiSystem, "_backlight_file", lambda _self: None)
     assert pi.get_brightness() == 80
+    assert pi.has_hardware_brightness() is False
     assert pi.set_brightness(50) is False

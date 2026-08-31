@@ -23,6 +23,7 @@ APP_IDS = [
     "gallery",
     "music",
     "gba",
+    "ps1",
     "fishing",
     "memo",
     "pomodoro",
@@ -95,18 +96,16 @@ async def test_fishing_full_round(tmp_path: Path) -> None:
     mounted = manager._mounted["fishing"]
     app = mounted.app
     app.player.energy = 100
-    app.world.cast()
-    # Force an immediate bite and reel to landing.
-    app.world.update(10.0)
-    assert app.world.hook_state in ("fighting",)
-    for _ in range(20):
-        app.world.reel()
-        app.world.update(0.016)
-        if app.world.hook_state == "landed":
+    app.bait_left = 5
+    app._start_trip()
+    fish = next(item for item in app.world.fish if item.size == "small")
+    fish.state = "bite"
+    fish.bite_deadline = app.world.time + 10
+    cargo_before = len(app.cargo)
+    app._reel()
+    for _ in range(120):
+        app.update(1 / 30)
+        if len(app.cargo) > cargo_before:
             break
-    assert app.world.hook_state == "landed"
-    cargo_before = len(app.player.cargo)
-    app._land_fish()
-    assert len(app.player.cargo) == cargo_before + 1
+    assert len(app.cargo) == cargo_before + 1
     await manager.leave_current()
-    # State persisted through store-less context? save skipped when store None.

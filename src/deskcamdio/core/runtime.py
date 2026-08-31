@@ -239,14 +239,22 @@ class DeviceRuntime:
         self.hardware_input: Any = None
         self.game_session: Any = None
         self._game_poll_task: asyncio.Task[None] | None = None
+        self._game_display_suspended = False
         self._controller_monitor: Any = None
         self._soft_sleep_task: asyncio.Task[None] | None = None
         self._toast_text = ""
         self._toast_until = 0.0
         self._back_button_rect = pygame.Rect(428, 428, 52, 52)
         self._edge_swipe_start: tuple[int, int] | None = None
+        self._touch_feedback_start: tuple[int, int] | None = None
+        self._touch_feedback_moved = False
         self._workers: dict[str, str] = {}
         self._health_task: asyncio.Task[None] | None = None
+        self._system_status_task: asyncio.Task[None] | None = None
+        self._system_overlay: Any = None
+        self._software_brightness = 100
+        self._software_dimming_enabled = False
+        self._dimming_surface = pygame.Surface(SCREEN_SIZE, pygame.SRCALPHA)
 
     # ---- lifecycle -------------------------------------------------------
 
@@ -313,6 +321,18 @@ class DeviceRuntime:
 
         self.system = create_system_control()
         await asyncio.to_thread(self.system.set_system_volume, self.audio.volume_percent)
+        self._software_dimming_enabled = not await asyncio.to_thread(
+            self.system.has_hardware_brightness
+        )
+        stored_brightness = int(await self.store.get_setting("brightness", 100))
+        if self._software_dimming_enabled:
+            self._set_software_brightness(stored_brightness)
+        from deskcamdio.ui.system_overlay import SystemOverlay
+
+        self._system_overlay = SystemOverlay(
+            volume=self.audio.volume_percent,
+            brightness=(self._software_brightness if self._software_dimming_enabled else 80),
+        )
         from deskcamdio.services.hardware_input import create_hardware_input
 
         self.hardware_input = create_hardware_input()
@@ -324,12 +344,16 @@ class DeviceRuntime:
         self._last_activity = time.monotonic()
         self.bus.subscribe("settings.changed", self._on_settings_changed)
         self.bus.subscribe("gba.launch_requested", self._on_game_launch_requested)
+        self.bus.subscribe("ps1.launch_requested", self._on_ps1_launch_requested)
         self.bus.subscribe("voice.toggle", lambda _event: self.toggle_voice())
         self.bus.subscribe("app.fault", self._on_app_fault)
         await self._enter_standby()
         self.running = True
         self._health_task = asyncio.get_running_loop().create_task(
             self._health_loop(), name="runtime:health"
+        )
+        self._system_status_task = asyncio.get_running_loop().create_task(
+            self._system_status_loop(), name="runtime:system-status"
         )
         LOGGER.info("event=runtime_started version=%s", __version__)
 
@@ -385,7 +409,7 @@ class DeviceRuntime:
             self.show_toast(f"音量 {self.audio.volume_percent}")
         elif name == "short_press":
             if self.machine.state is RunState.EXTERNAL_GAME and self.game_session is not None:
-                self.game_session.stop()
+                self.game_session.request_stop("ec11")
             elif self.navigator_active() == "camera":
                 self._action_camera_capture({})
             else:
@@ -393,7 +417,7 @@ class DeviceRuntime:
         elif name == "long_press":
             self._enter_soft_sleep()
         elif name == "controller_exit" and self.game_session is not None:
-            self.game_session.stop()
+            self.game_session.request_stop("controller")
 
     def _set_display_power(self, enabled: bool) -> None:
         import subprocess
@@ -422,7 +446,8 @@ class DeviceRuntime:
         if self.machine.state is RunState.SOFT_SLEEP:
             return
         if self.machine.state is RunState.EXTERNAL_GAME and self.game_session is not None:
-            self.game_session.stop()
+            self.game_session.request_stop("soft-sleep")
+            return
         if self.voice_service is not None:
             self.voice_service.cancel()
         if self.audio is not None:
@@ -483,10 +508,15 @@ class DeviceRuntime:
                     await asyncio.sleep(0.2 if self.machine.state is RunState.SOFT_SLEEP else 0.05)
                 elif self.machine.state is not RunState.SHUTTING_DOWN:
                     self.manager.update(1 / frame_rate)
+                    if self._system_overlay is not None:
+                        self._system_overlay.update(1 / frame_rate)
                     self.screen.fill((8, 12, 18))
                     self.manager.render(self.screen)
                     self._render_global_back(self.screen)
+                    if self._system_overlay is not None:
+                        self._system_overlay.render(self.screen, self.theme.tokens)
                     self._render_toast(self.screen)
+                    self._render_software_dimming(self.screen)
                     pygame.display.flip()
                 self.last_frame_ms = (time.monotonic() - started) * 1000
                 self.frame_ms_history.append(self.last_frame_ms)
@@ -501,10 +531,18 @@ class DeviceRuntime:
     def _effective_frame_rate(self) -> int:
         if self.machine.state is RunState.VOICE_SESSION:
             return min(15, self.target_fps)
+        if self._system_overlay is not None and (
+            self._system_overlay.animating or self._system_overlay.interacting
+        ):
+            return max(60, self.target_fps)
         if self.manager is not None and self.manager.active_id == "standby":
             mounted = self.manager._mounted.get("standby")  # noqa: SLF001
             if mounted is not None and bool(getattr(mounted.app, "low_power", False)):
                 return min(5, self.target_fps)
+        if self.manager is not None:
+            preferred = self.manager.preferred_fps()
+            if preferred is not None:
+                return max(self.target_fps, preferred)
         return self.target_fps
 
     # ---- voice -------------------------------------------------------------
@@ -720,6 +758,10 @@ class DeviceRuntime:
         sha256 = str(event.payload.get("sha256", ""))
         asyncio.get_running_loop().create_task(self._start_game(sha256))
 
+    def _on_ps1_launch_requested(self, event: Any) -> None:
+        path = str(event.payload.get("path", ""))
+        asyncio.get_running_loop().create_task(self._start_ps1_game(path))
+
     async def _enter_route(self, app_id: str) -> None:
         assert self.manager is not None
         await self.manager.enter(RouteState(app_id=app_id))
@@ -756,9 +798,11 @@ class DeviceRuntime:
             self.data_dir / "saves" / "gba",
             controller_config=mapping,
         )
+        self._suspend_display_for_game()
         try:
             session.start()
         except Exception as exc:  # noqa: BLE001
+            self._restore_display_after_game()
             self.show_toast(f"启动失败：{exc}")
             if was_playing:
                 self.audio.resume_music()
@@ -771,11 +815,57 @@ class DeviceRuntime:
         self._game_poll_task = asyncio.get_running_loop().create_task(self._watch_game(was_playing))
         self.show_toast("游戏中：四肩键同按 1 秒退出")
 
+    async def _start_ps1_game(self, raw_path: str) -> None:
+        if self.machine.state not in (RunState.LAUNCHER, RunState.APP):
+            return
+        content = Path(raw_path).resolve()
+        library = (self.data_dir / "roms" / "ps1").resolve()
+        if not content.is_file() or library not in content.parents:
+            self.show_toast("PS1 游戏文件无效")
+            return
+        from deskcamdio.services.game_session import ControllerMonitor
+        from deskcamdio.services.ps1_session import (
+            DEFAULT_PCSX_CORE,
+            DEFAULT_RETROARCH,
+            RetroArchSession,
+            ensure_ps1_runtime,
+        )
+
+        retroarch = Path(os.getenv("DESKCAMDIO_RETROARCH_BIN", str(DEFAULT_RETROARCH)))
+        core = Path(os.getenv("DESKCAMDIO_PCSX_CORE", str(DEFAULT_PCSX_CORE)))
+        try:
+            ensure_ps1_runtime(retroarch, core)
+        except Exception as exc:  # noqa: BLE001 - user-facing installation failure
+            self.show_toast(str(exc))
+            return
+        was_playing = bool(getattr(self.audio, "music_playing", False))
+        if was_playing:
+            self.audio.pause_music()
+        session = RetroArchSession(retroarch, core, content, self.data_dir)
+        self._suspend_display_for_game()
+        try:
+            session.start()
+        except Exception as exc:  # noqa: BLE001
+            self._restore_display_after_game()
+            self.show_toast(f"PS1 启动失败：{exc}")
+            if was_playing:
+                self.audio.resume_music()
+            return
+        self.game_session = session
+        self._controller_monitor = ControllerMonitor(session)
+        self._controller_monitor.start()
+        self.machine.transition(RunState.EXTERNAL_GAME, reason=f"ps1:{content.stem[:24]}")
+        self._game_poll_task = asyncio.get_running_loop().create_task(self._watch_game(was_playing))
+        self.show_toast("PS1 游戏中：四肩键同按 1 秒退出")
+
     async def _watch_game(self, resume_music_after: bool) -> None:
-        while self.game_session is not None and self.game_session.running:
-            await asyncio.sleep(0.5)
-            if self.game_session is not None and self.game_session.poll():
+        while self.game_session is not None:
+            if self.game_session.poll():
                 break
+            if not self.game_session.running:
+                break
+            await asyncio.sleep(0.5)
+        self._restore_display_after_game()
         if self.machine.state is RunState.EXTERNAL_GAME:
             self.machine.transition(RunState.LAUNCHER, reason="game exit")
             await self._enter_route("launcher")
@@ -786,13 +876,40 @@ class DeviceRuntime:
             self._controller_monitor = None
         self.game_session = None
 
+    def _suspend_display_for_game(self) -> None:
+        """Release the DRM master so the external mGBA SDL process can own it."""
+        if self.headless or self._game_display_suspended:
+            return
+        pygame.display.quit()
+        self._game_display_suspended = True
+
+    def _restore_display_after_game(self) -> None:
+        """Reacquire KMS and redraw a clean Fish frame after mGBA exits."""
+        if not self._game_display_suspended:
+            return
+        pygame.display.init()
+        self.screen = pygame.display.set_mode(SCREEN_SIZE)
+        self._game_display_suspended = False
+        self._render_boot_logo()
+
     # ---- input & navigation ----------------------------------------------
 
     def _pump_events(self) -> None:
+        if self.machine.state is RunState.EXTERNAL_GAME and not pygame.display.get_init():
+            # mGBA owns KMS. EC11/controller callbacks still arrive through
+            # their dedicated threads, while pygame has no valid event queue.
+            return
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.request_shutdown("quit")
                 return
+            if self._system_overlay is not None:
+                overlay_action = self._system_overlay.handle_input(event)
+                if overlay_action is not None:
+                    self._handle_overlay_action(*overlay_action)
+                    self._note_activity()
+                    continue
+            self._handle_touch_feedback(event)
             if event.type == pygame.KEYDOWN and event.key in BACK_KEYS:
                 self.navigate_back()
                 continue
@@ -814,6 +931,51 @@ class DeviceRuntime:
             }
             if self.manager is not None and self.machine.state in foreground:
                 self.manager.handle_input(event)
+
+    def _handle_overlay_action(self, action: str, value: int) -> None:
+        if action.startswith("volume"):
+            self.audio.set_volume(value)
+            if action.endswith("_commit"):
+                asyncio.create_task(self.store.set_setting("volume", value))
+                asyncio.create_task(asyncio.to_thread(self.system.set_system_volume, value))
+        elif action.startswith("brightness") and action.endswith("_commit"):
+            asyncio.create_task(self.store.set_setting("brightness", value))
+            asyncio.create_task(asyncio.to_thread(self.system.set_brightness, value))
+        if action.startswith("brightness") and self._software_dimming_enabled:
+            self._set_software_brightness(value)
+
+    def _set_software_brightness(self, value: int) -> None:
+        self._software_brightness = max(5, min(100, int(value)))
+        alpha = round((100 - self._software_brightness) * 1.9)
+        self._dimming_surface.fill((0, 0, 0, alpha))
+
+    def _render_software_dimming(self, surface: pygame.Surface) -> None:
+        if not self._software_dimming_enabled or self._software_brightness >= 100:
+            return
+        surface.blit(self._dimming_surface, (0, 0))
+
+    def _handle_touch_feedback(self, event: pygame.event.Event) -> None:
+        """Play one quiet UI tick for a completed tap, never for a swipe."""
+        if self.machine.state not in {RunState.STANDBY, RunState.LAUNCHER, RunState.APP}:
+            self._touch_feedback_start = None
+            return
+        if event.type == pygame.MOUSEBUTTONDOWN and getattr(event, "button", 1) == 1:
+            self._touch_feedback_start = (int(event.pos[0]), int(event.pos[1]))
+            self._touch_feedback_moved = False
+            return
+        if event.type == pygame.MOUSEMOTION and self._touch_feedback_start is not None:
+            dx = int(event.pos[0]) - self._touch_feedback_start[0]
+            dy = int(event.pos[1]) - self._touch_feedback_start[1]
+            self._touch_feedback_moved = self._touch_feedback_moved or dx * dx + dy * dy > 576
+            return
+        if event.type != pygame.MOUSEBUTTONUP or self._touch_feedback_start is None:
+            return
+        dx = int(event.pos[0]) - self._touch_feedback_start[0]
+        dy = int(event.pos[1]) - self._touch_feedback_start[1]
+        if not self._touch_feedback_moved and dx * dx + dy * dy <= 576:
+            self.audio.play_sound("tap", category="ui")
+        self._touch_feedback_start = None
+        self._touch_feedback_moved = False
 
     def _handle_global_navigation(self, event: pygame.event.Event) -> bool:
         """Android-like back affordance: edge button plus left-edge swipe."""
@@ -916,7 +1078,7 @@ class DeviceRuntime:
             self._controller_monitor.stop()
             self._controller_monitor = None
         if self.game_session is not None:
-            self.game_session.stop()
+            self.game_session.request_stop("shutdown")
             self.game_session = None
         if self._game_poll_task is not None:
             self._game_poll_task.cancel()
@@ -944,6 +1106,11 @@ class DeviceRuntime:
         if self._health_task is not None:
             self._health_task.cancel()
             self._health_task = None
+        if self._system_status_task is not None:
+            self._system_status_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._system_status_task
+            self._system_status_task = None
         if self.manager is not None:
             await self.manager.leave_current(LeaveReason.SHUTDOWN)
             await self.manager.dispose_all()
@@ -978,6 +1145,36 @@ class DeviceRuntime:
                 health_mod.write_health(self.run_dir / "health.json", snapshot)
             self._notify_watchdog()
             await asyncio.sleep(self.health_interval)
+
+    async def _system_status_loop(self) -> None:
+        while True:
+            try:
+                wifi, bluetooth, controller, brightness = await asyncio.gather(
+                    asyncio.to_thread(self.system.wifi_status),
+                    asyncio.to_thread(self.system.bluetooth_status),
+                    asyncio.to_thread(self.system.controller_connected),
+                    asyncio.to_thread(self.system.get_brightness),
+                )
+                if self._system_overlay is not None:
+                    self._system_overlay.status.update(
+                        {
+                            "wifi": bool(wifi.get("connected")),
+                            "ssid": str(wifi.get("ssid", "")),
+                            "bluetooth": bool(bluetooth.get("powered")),
+                            "controller": bool(controller),
+                            "brightness": int(brightness),
+                        }
+                    )
+                    if (
+                        not self._software_dimming_enabled
+                        and self._system_overlay.active_slider != "brightness"
+                    ):
+                        self._system_overlay.brightness = int(brightness)
+                    if self._system_overlay.active_slider != "volume":
+                        self._system_overlay.volume = int(self.audio.volume_percent)
+            except Exception:  # noqa: BLE001 - status chrome must never stop the UI
+                LOGGER.exception("event=system_status_refresh_failed")
+            await asyncio.sleep(5.0)
 
     @staticmethod
     def _notify_watchdog() -> None:

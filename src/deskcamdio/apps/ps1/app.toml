@@ -1,0 +1,7 @@
+id = "ps1"
+name = "PS1"
+icon = "game"
+order = 5
+api_version = 2
+entrypoint = "deskcamdio.apps.ps1.app:Ps1App"
+

@@ -1,81 +1,73 @@
-"""Fishing app branch coverage: landing, capsize, shop close, modal render."""
+"""Legacy fishing game coverage: trip, catch, capsize, shop and rendering."""
 
 from __future__ import annotations
 
 import pygame
 
-from deskcamdio.apps.fishing.world import HookState
+from deskcamdio.apps.fishing.app import GameModal
+from deskcamdio.apps.fishing.world import ReelResult
 
 
-async def test_land_fish_adds_cargo_and_spends_energy(harness) -> None:
+async def test_trip_and_catch_adds_cargo(harness) -> None:
     fishing = await harness.open("fishing")
     fishing.player.energy = 5
-    fishing.player.coins = 100
-    fishing.world.cast()
-    fishing.world.update(10.0)
-    assert fishing.world.hook_state is HookState.FIGHTING
-    fishing.world.progress = 0.99
-    fishing.world.reel()
-    assert fishing.world.hook_state is HookState.LANDED
+    fishing.bait_left = 5
+    fishing._start_trip()
+    assert fishing.at_sea is True
 
-    cargo_before = len(fishing.player.cargo)
-    fishing._land_fish()
-    assert len(fishing.player.cargo) == cargo_before + 1
-    assert fishing.player.energy == 4
-    assert fishing.world.hook_state is HookState.IDLE
+    before = len(fishing.cargo)
+    fishing._complete_catch(ReelResult("caught", weight=2, value=20, size="small"))
+    assert len(fishing.cargo) == before + 1
+    assert fishing.cargo[-1]["weight"] == 2
 
 
-async def test_capsize_clears_cargo_and_charges_rescue(harness) -> None:
-    from deskcamdio.apps.fishing.economy import CAPSIZE_LOSS_COINS
-
+async def test_capsize_returns_to_dock_and_charges_rescue(harness) -> None:
     fishing = await harness.open("fishing")
-    # Pre-load cargo beyond the limit; next landing capsizes the boat.
-    fishing.player.cargo.append(
-        {
-            "species": "carp",
-            "name": "鲤鱼",
-            "weight": 40.0,
-            "rare": False,
-            "value": 10,
-            "caught_at": 0,
-        }
-    )
-    fishing.player.energy = 5
     fishing.player.coins = 200
-    fishing.player.bait = 7
+    fishing.at_sea = True
+    fishing.cargo = [{"name": "大鱼", "size": "large", "weight": 6, "value": 80}]
+    fishing._complete_catch(ReelResult("caught", weight=6, value=120, size="large"))
 
-    fishing.world.cast()
-    fishing.world.update(10.0)
-    fishing.world.progress = 1.0
-    fishing.world.reel()
-    fishing._land_fish()
-
-    assert fishing.player.cargo == []
-    assert fishing.player.bait == 0
-    assert fishing.player.coins == 200 - CAPSIZE_LOSS_COINS
+    assert fishing.at_sea is False
+    assert fishing.cargo == []
+    assert fishing.bait_left == 0
+    assert fishing.player.coins == 100
+    assert fishing.modal is not None and "船翻" in fishing.modal.title
 
 
-async def test_shop_buy_rejected_without_coins_then_close(harness) -> None:
+async def test_shop_buy_rejected_without_coins_then_rescue(harness) -> None:
     fishing = await harness.open("fishing")
-    fishing.modal = "shop"
-    fishing.player.coins = 15  # cannot afford a pack (costs 100)
-    fishing.handle_input(pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": (160, 274)}))
-    assert fishing.player.bait == 20  # purchase rejected, stock unchanged
-    fishing.handle_input(
-        pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": (240, 350)})
-    )  # close button
-    assert fishing.modal is None
+    fishing.player.coins = 10
+    fishing.bait_left = 0
+    fishing.warehouse.clear()
+    fishing._buy_bait()
+    assert fishing.bait_left == 5
+
+    fishing.player.coins = 10
+    fishing.bait_left = 1
+    fishing._buy_bait()
+    assert fishing.bait_left == 1
+    assert fishing.modal is not None and "金币不足" in fishing.modal.title
 
 
-async def test_render_modal_and_qte_branches(harness) -> None:
+async def test_render_dock_sea_and_modal(harness) -> None:
     surface = pygame.Surface((480, 480))
     fishing = await harness.open("fishing")
-    fishing.modal = "shop"
-    fishing.world.cast()
-    fishing.world.update(10.0)
-    if fishing.world.current is not None:
-        fishing.world.current["rare"] = True
-    fishing.world.qte_active = True
     fishing.render(surface)
-    fishing.modal = None
+    fishing.at_sea = True
+    fishing.modal = GameModal("提示", "测试旧版弹窗自动换行", 1.0, (40, 170, 110))
     fishing.render(surface)
+    assert surface.get_bounding_rect().width == 480
+
+
+async def test_legacy_state_persists_across_unmount(harness) -> None:
+    fishing = await harness.open("fishing")
+    fishing.player.coins = 321
+    fishing.bait_left = 9
+    fishing._save()
+    await fishing._flush_save()
+    await harness.manager.leave_current()
+
+    restored = await harness.open("fishing")
+    assert restored.player.coins == 321
+    assert restored.bait_left == 9

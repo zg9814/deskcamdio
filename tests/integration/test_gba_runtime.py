@@ -7,6 +7,7 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pygame
 import pytest
 
 from deskcamdio.core.runtime import DeviceRuntime, RunState
@@ -41,6 +42,31 @@ async def wait_for(predicate, timeout: float = 8.0) -> bool:
             return True
         await asyncio.sleep(0.05)
     return False
+
+
+async def test_external_game_releases_and_restores_display(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    monkeypatch.setenv("SDL_AUDIODRIVER", "dummy")
+    monkeypatch.setenv("DESKCAMDIO_PLATFORM", "simulator")
+    runtime = DeviceRuntime(
+        data_dir=tmp_path / "data",
+        run_dir=tmp_path / "run",
+        headless=False,
+        fps=240,
+        health_interval=3600,
+    )
+    await runtime.initialize()
+    try:
+        assert pygame.display.get_init()
+        runtime._suspend_display_for_game()
+        assert not pygame.display.get_init()
+        runtime._restore_display_after_game()
+        assert pygame.display.get_init()
+        assert runtime.screen is not None and runtime.screen.get_size() == (480, 480)
+    finally:
+        await runtime.shutdown()
 
 
 async def test_launch_requested_runs_game_and_returns(

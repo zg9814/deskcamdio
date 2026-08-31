@@ -59,6 +59,33 @@ async def test_tap_on_standby_opens_launcher(tmp_path: Path) -> None:
         await runtime.shutdown()
 
 
+async def test_touch_feedback_plays_for_tap_not_swipe(tmp_path: Path) -> None:
+    runtime = await make_runtime(tmp_path)
+    sounds: list[tuple[str, str]] = []
+    runtime.audio.play_sound = lambda name, category="ui": sounds.append((name, category))
+    try:
+        click((240, 200))
+        runtime._pump_events()
+        assert sounds == [("tap", "ui")]
+
+        pygame.event.post(
+            pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": (300, 200)})
+        )
+        pygame.event.post(
+            pygame.event.Event(
+                pygame.MOUSEMOTION,
+                {"buttons": (1, 0, 0), "pos": (180, 200)},
+            )
+        )
+        pygame.event.post(
+            pygame.event.Event(pygame.MOUSEBUTTONUP, {"button": 1, "pos": (180, 200)})
+        )
+        runtime._pump_events()
+        assert sounds == [("tap", "ui")]
+    finally:
+        await runtime.shutdown()
+
+
 async def test_launcher_tile_click_launches_app(tmp_path: Path) -> None:
     runtime = await make_runtime(tmp_path)
     try:

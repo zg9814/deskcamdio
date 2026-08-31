@@ -112,25 +112,22 @@ async def test_gallery_thumbnails_on_disk(harness) -> None:
     assert list((harness.data_dir / "media" / "thumbnails").glob("*.jpg"))
 
 
-async def test_fishing_shop_purchase_and_codex_helpers(harness) -> None:
+async def test_fishing_shop_purchase_sell_and_upgrade(harness) -> None:
     fishing = await harness.open("fishing")
-    fishing.modal = "shop"
     fishing.player.coins = 500
-    fishing.player.bait = 0
-    fishing.handle_input(pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": (160, 274)}))
-    assert fishing.player.bait == 5
-    assert fishing.player.coins == 400
+    fishing.bait_left = 0
+    fishing._buy_bait()
+    assert fishing.bait_left == 5
+    assert fishing.player.coins == 480
 
-    from deskcamdio.apps.fishing.app import codex_total, species_count
+    fishing.warehouse.append({"name": "鱼", "size": "small", "weight": 1, "value": 60})
+    fishing._sell_all()
+    assert fishing.warehouse == []
+    assert fishing.player.coins == 540
 
-    assert codex_total() == 10
-    assert species_count(fishing.player) == 0
-    fishing.player.cargo.append(
-        {"species": "carp", "weight": 1.0, "rare": True, "value": 60, "caught_at": 0}
-    )
-    gained = fishing.player.sell_all()
-    assert gained == 60
-    assert species_count(fishing.player) == 1
+    old_level = fishing.player.rod_level
+    fishing._upgrade("rod")
+    assert fishing.player.rod_level == old_level + 1
 
 
 async def test_camera_capture_flow_writes_photo(harness, monkeypatch) -> None:

@@ -59,10 +59,13 @@ SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy DESKCAMDIO_HEADLESS=1 \
 
 echo "==> 6/8 mGBA self-containment"
 MGBA_DIR="${RELEASE_DIR}/deploy/native/aarch64/mgba"
-if [[ -x "${MGBA_DIR}/mgba" ]]; then
-    [[ -e "${MGBA_DIR}/libmgba.so.0.10" ]] || { echo "FATAL: bundled libmgba missing" >&2; exit 1; }
-    "${MGBA_DIR}/mgba" --version >/dev/null
-fi
+[[ -f "${MGBA_DIR}/mgba" ]] || { echo "FATAL: bundled mGBA binary missing" >&2; exit 1; }
+[[ -f "${MGBA_DIR}/libmgba.so.0.10" ]] || { echo "FATAL: bundled libmgba missing" >&2; exit 1; }
+# Windows/ZIP/SCP staging can strip the executable bit even though the ELF
+# payload is intact.  Restore it before validating instead of silently
+# skipping the entire mGBA gate.
+sudo chmod 0755 "${MGBA_DIR}/mgba"
+"${MGBA_DIR}/mgba" --version >/dev/null
 
 echo "==> 7/8 install service and data ownership"
 sudo cp -f "${RELEASE_DIR}/deploy/systemd/deskcamdio.service" /etc/systemd/system/

@@ -96,7 +96,7 @@ async def index_directory(roms_dir: Path, store: Any) -> int:
     roms_dir.mkdir(parents=True, exist_ok=True)
     rows = await store.fetch_all("SELECT path, sha256, size_bytes, mtime_ns FROM gba_roms")
     known = {str(row[1]) for row in rows}
-    by_path = {str(row[0]): (int(row[2]), int(row[3])) for row in rows}
+    by_path = {str(row[0]): (str(row[1]), int(row[2]), int(row[3])) for row in rows}
     added = 0
     for path in sorted(roms_dir.glob("*.gba")):
         try:
@@ -105,7 +105,7 @@ async def index_directory(roms_dir: Path, store: Any) -> int:
             LOGGER.warning("event=rom_rejected file=%s reason=%s", path.name, exc)
             continue
         cached = by_path.get(str(path))
-        if cached is not None and cached == (stat.st_size, stat.st_mtime_ns):
+        if cached is not None and cached[1:] == (stat.st_size, stat.st_mtime_ns):
             continue  # unchanged since last index — zero re-reads
         try:
             header = validate_file(path)
@@ -115,20 +115,22 @@ async def index_directory(roms_dir: Path, store: Any) -> int:
         digest = await asyncio.to_thread(sha256_file, path)
         if digest in known:
             continue
+        if cached is not None:
+            # The file at this path was replaced. The store atomically drops
+            # that stale path row before inserting the new content identity.
+            known.discard(cached[0])
         known.add(digest)
         await store.upsert_rom(
             {
                 "sha256": digest,
                 "path": str(path),
-                "title": header.title or path.stem,
+                "title": path.stem,
                 "game_code": header.game_code,
                 "size_bytes": stat.st_size,
                 "mtime_ns": stat.st_mtime_ns,
             }
         )
-        await asyncio.to_thread(
-            generate_cover, roms_dir.parent / "covers", digest, header.title or path.stem
-        )
+        await asyncio.to_thread(generate_cover, roms_dir.parent / "covers", digest, path.stem)
         added += 1
     return added
 
