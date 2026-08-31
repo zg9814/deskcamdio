@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -21,15 +22,39 @@ def os_env() -> None:
     os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
 
+def build_contact_sheet(paths: list[Path], destination: Path) -> None:
+    columns = 4
+    cell_width, cell_height = 250, 274
+    rows = (len(paths) + columns - 1) // columns
+    sheet = pygame.Surface((columns * cell_width, rows * cell_height))
+    sheet.fill((31, 38, 56))
+    font = pygame.font.Font(None, 20)
+    for index, path in enumerate(paths):
+        column, row = index % columns, index // columns
+        x, y = column * cell_width, row * cell_height
+        image = pygame.image.load(str(path))
+        preview = pygame.transform.smoothscale(image, (224, 224))
+        sheet.blit(preview, (x + 13, y + 12))
+        label = font.render(path.stem, True, (230, 237, 246))
+        sheet.blit(label, (x + 13, y + 244))
+    pygame.image.save(sheet, str(destination))
+
+
 async def main() -> None:
     os_env()
     root = Path(__file__).resolve().parents[1]
     out_dir = root / "work" / "screenshots"
     out_dir.mkdir(parents=True, exist_ok=True)
+    captured: list[Path] = []
+    data_dir = root / "work" / "simulator-data"
+    run_dir = root / "work" / "simulator-run"
+    for generated_dir in (data_dir, run_dir):
+        if generated_dir.exists():
+            shutil.rmtree(generated_dir)
 
     runtime = DeviceRuntime(
-        data_dir=root / ".shot-data",
-        run_dir=root / ".shot-run",
+        data_dir=data_dir,
+        run_dir=run_dir,
         headless=True,
         fps=240,
         health_interval=3600,
@@ -44,7 +69,9 @@ async def main() -> None:
         runtime.manager.render(surface)
         if global_back:
             runtime._render_global_back(surface)  # noqa: SLF001
-        pygame.image.save(surface, str(out_dir / f"{name}.png"))
+        path = out_dir / f"{name}.png"
+        pygame.image.save(surface, str(path))
+        captured.append(path)
         print("saved", name)
 
     async def enter(app_id: str, args: dict[str, str] | None = None) -> None:
@@ -132,6 +159,8 @@ async def main() -> None:
     await asyncio.sleep(0.1)
     await snap("state-diagnostics")
 
+    build_contact_sheet(captured, out_dir / "simulator-contact-sheet.png")
+    print("saved simulator-contact-sheet")
     await runtime.shutdown()
 
 

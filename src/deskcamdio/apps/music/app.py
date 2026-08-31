@@ -9,7 +9,7 @@ import pygame
 
 from deskcamdio.core.lifecycle import App, LeaveReason, RouteState
 from deskcamdio.core.runtime import RuntimeContext
-from deskcamdio.ui import components
+from deskcamdio.ui import art, components
 from deskcamdio.ui.aquarium import ambient, seabed
 from deskcamdio.ui.typography import draw_wrapped, render_text
 
@@ -162,8 +162,9 @@ class MusicApp(App):
 
         if not self.tracks:
             seabed(surface, theme, ticks * 0.25)
+            art.blit_centered(surface, "empty-music-160x112-v1.png", (240, 286))
             hint = render_text("曲库还是空的", 18, theme.text_secondary, bold=True)
-            surface.blit(hint, hint.get_rect(center=(240, 250)))
+            surface.blit(hint, hint.get_rect(center=(240, 356)))
 
         toggle = pygame.Rect(190, 414, 100, 48)
         self._buttons["toggle"] = toggle

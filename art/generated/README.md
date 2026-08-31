@@ -18,6 +18,11 @@ localization, theme tinting, and Raspberry Pi Zero 2 W memory efficiency.
 - Four theme families: Aquatic, Fish, Graphite, and Cream.
 - Automated manifest, dimension, blank-image, source-existence, and alpha QA:
   zero reported problems as of 2026-08-31.
+- All 76 normalized PNGs are packaged under `src/deskcamdio/assets/art/`.
+- Selected assets are wired into the real Pygame standby, launcher, camera,
+  gallery, music, memo, GBA, PS1, settings, and fishing pages using lazy loading.
+- The 480×480 headless simulator and wheel packaging tests pass; Raspberry Pi
+  display/performance review remains the final promotion gate.
 
 ## Covered asset families
 
@@ -40,6 +45,8 @@ localization, theme tinting, and Raspberry Pi Zero 2 W memory efficiency.
   neighbour scaling and normalized transparency.
 - `processed/generated-assets-contact-sheet-v1.png`: complete visual contact
   sheet for side-by-side review.
+- `processed/simulator-pages-contact-sheet-v1.png`: real 480×480 application
+  pages rendered by the headless Pygame simulator after integration.
 - `asset-manifest.csv`: asset ID, file, dimensions, alpha, purpose, theme,
   exact source file, generation method, license status, and review state.
 - `../../scripts/process_generated_art.py`: reproducible normalization,

@@ -7,6 +7,8 @@ from importlib.resources import files
 
 import pygame
 
+from deskcamdio.ui import art
+
 
 @dataclass(frozen=True, slots=True)
 class AnimationClip:
@@ -57,6 +59,15 @@ class FishAnimator:
         cached = self._cache.get(key)
         if cached is not None:
             return cached
+        generated = self._generated_frame(index)
+        if generated is not None:
+            image = pygame.transform.scale(generated, size)
+            if flip_x:
+                image = pygame.transform.flip(image, True, False)
+            if len(self._cache) >= 32:
+                self._cache.clear()
+            self._cache[key] = image
+            return image
         group_x = self.color_index % 4
         group_y = self.color_index // 4
         source = pygame.Rect((group_x * 4 + index) * 64, (group_y * 8 + clip.row) * 64, 64, 64)
@@ -67,6 +78,25 @@ class FishAnimator:
             self._cache.clear()
         self._cache[key] = image
         return image
+
+    def _generated_frame(self, index: int) -> pygame.Surface | None:
+        if self.color_index == 3:
+            return art.load("companion-orange-64-v1.png")
+        if self.color_index == 7:
+            return art.load("companion-yellow-64-v1.png")
+        if self.color_index != 0:
+            return None
+        strip_name, frame_count = {
+            "swim": ("hero-swim-strip-256x64-v1.png", 4),
+            "idle": ("hero-blink-strip-128x64-v1.png", 2),
+            "death": ("hero-sleep-strip-128x64-v1.png", 2),
+            "attack": ("hero-turn-strip-256x64-v1.png", 4),
+        }[self.clip_name]
+        strip = art.load(strip_name)
+        if strip is None:
+            return None
+        frame = index % frame_count
+        return strip.subsurface(pygame.Rect(frame * 64, 0, 64, 64))
 
     def clear(self) -> None:
         self._cache.clear()

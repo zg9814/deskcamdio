@@ -60,6 +60,18 @@ def test_wheel_ships_sound_assets(wheel_path: Path) -> None:
     assert {"tap", "shutter", "alarm", "error"} <= {Path(n).stem for n in wavs}
 
 
+def test_wheel_ships_generated_ui_art(wheel_path: Path) -> None:
+    names = _names(wheel_path)
+    art_pngs = [
+        name
+        for name in names
+        if name.startswith("deskcamdio/assets/art/") and name.endswith(".png")
+    ]
+    assert len(art_pngs) == 76
+    assert any(name.endswith("aquarium-far-aquatic-480-v1.png") for name in art_pngs)
+    assert any(name.endswith("state-camera-unavailable-160x112-v1.png") for name in art_pngs)
+
+
 def _names(wheel: Path) -> list[str]:
     with zipfile.ZipFile(wheel) as bundle:
         return bundle.namelist()

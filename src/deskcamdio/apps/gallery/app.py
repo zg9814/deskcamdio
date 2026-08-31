@@ -11,8 +11,7 @@ import pygame
 
 from deskcamdio.core.lifecycle import App, LeaveReason, RouteState
 from deskcamdio.core.runtime import RuntimeContext
-from deskcamdio.ui import components
-from deskcamdio.ui.animation import FishAnimator
+from deskcamdio.ui import art, components
 from deskcamdio.ui.aquarium import ambient, seabed
 from deskcamdio.ui.themes import ThemeTokens
 from deskcamdio.ui.typography import draw_wrapped, render_text
@@ -102,9 +101,6 @@ class GalleryApp(App):
         self.viewer_index: int | None = None
         self._viewer_surfaces: dict[int, pygame.Surface | None] = {}
         self._tiles: list[tuple[Path, pygame.Rect]] = []
-        self._empty_fish = FishAnimator(3)
-        self._empty_fish_x = 176.0
-        self._empty_fish_direction = 1
         self._elapsed = 0.0
 
     async def mount(self, context: RuntimeContext) -> None:
@@ -144,13 +140,6 @@ class GalleryApp(App):
 
     def update(self, delta_seconds: float) -> None:
         self._elapsed += delta_seconds
-        if not self.photos:
-            self._empty_fish.update(delta_seconds)
-            self._empty_fish_x += 18 * self._empty_fish_direction * delta_seconds
-            if self._empty_fish_x >= 280:
-                self._empty_fish_direction = -1
-            elif self._empty_fish_x <= 136:
-                self._empty_fish_direction = 1
 
     def render(self, surface: pygame.Surface) -> None:
         assert self._context is not None
@@ -178,13 +167,11 @@ class GalleryApp(App):
         if not self.photos:
             seabed(surface, theme, self._elapsed * 0.3)
             components.glass_card(surface, pygame.Rect(48, 92, 384, 224), theme, alpha=205)
-            fish = self._empty_fish.frame((76, 76), flip_x=self._empty_fish_direction < 0)
-            surface.blit(fish, fish.get_rect(center=(round(self._empty_fish_x), 266)))
-            components.icon(surface, "photo", (240, 145), 36, theme.accent)
+            art.blit_centered(surface, "empty-gallery-160x112-v1.png", (240, 158))
             hint = render_text("还没有照片", 20, theme.text_primary, bold=True)
-            surface.blit(hint, hint.get_rect(center=(240, 190)))
+            surface.blit(hint, hint.get_rect(center=(240, 236)))
             sub = render_text("打开相机，记录第一张水下记忆", 15, theme.text_secondary)
-            surface.blit(sub, sub.get_rect(center=(240, 220)))
+            surface.blit(sub, sub.get_rect(center=(240, 270)))
 
     def _render_viewer(self, surface: pygame.Surface, theme: ThemeTokens) -> None:
         assert self.viewer_index is not None and self._context is not None

@@ -9,10 +9,10 @@ import pygame
 from deskcamdio.core.lifecycle import App, LeaveReason, RouteState
 from deskcamdio.core.runtime import RuntimeContext
 from deskcamdio.services.ps1_library import scan_ps1_directory
-from deskcamdio.ui import components
+from deskcamdio.ui import art, components
 from deskcamdio.ui.aquarium import ambient, seabed
 from deskcamdio.ui.pager import PagePager
-from deskcamdio.ui.typography import render_text
+from deskcamdio.ui.typography import draw_wrapped, render_text
 
 ITEMS_PER_PAGE = 5
 
@@ -129,11 +129,20 @@ class Ps1App(App):
         if not self.games:
             seabed(surface, theme, elapsed * 0.2)
             components.glass_card(surface, pygame.Rect(48, 92, 384, 226), theme, alpha=216)
-            components.icon(surface, "player-play", (240, 148), 40, theme.accent)
+            art.blit_centered(surface, "ps1-disc-case-96x128-v1.png", (132, 196), (72, 96))
             empty = render_text("还没有 PS1 游戏", 20, theme.text_primary, bold=True)
-            surface.blit(empty, empty.get_rect(center=(240, 202)))
-            sub = render_text("导入 CUE/BIN、CHD、PBP 或 ISO", 15, theme.text_secondary)
-            surface.blit(sub, sub.get_rect(center=(240, 236)))
+            surface.blit(empty, (196, 126))
+            draw_wrapped(
+                surface,
+                "导入 CUE/BIN、CHD、PBP 或 ISO",
+                pygame.Rect(196, 162, 210, 52),
+                15,
+                theme.text_secondary,
+            )
+            status = render_text("蓝牙 / USB 手柄", 14, theme.accent, bold=True)
+            surface.blit(status, (196, 228))
+            exit_hint = render_text("四肩键组合退出", 13, theme.text_secondary)
+            surface.blit(exit_hint, (196, 254))
 
     async def leave(self, reason: LeaveReason) -> None:
         del reason

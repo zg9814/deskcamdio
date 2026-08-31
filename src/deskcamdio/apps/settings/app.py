@@ -12,7 +12,7 @@ import pygame
 
 from deskcamdio.core.lifecycle import App, LeaveReason, RouteState
 from deskcamdio.core.runtime import RuntimeContext
-from deskcamdio.ui import components, renderer
+from deskcamdio.ui import art, components, renderer
 from deskcamdio.ui.themes import DEFAULT_THEME_ID, THEMES, ThemeTokens
 from deskcamdio.ui.typography import render_text
 
@@ -446,6 +446,12 @@ class SettingsApp(App):
             theme,
             trailing=" ",
         )
+        controller_art = (
+            "state-controller-pairing-160x112-v1.png"
+            if candidate is not None and not candidate.get("connected")
+            else "state-controller-disconnected-160x112-v1.png"
+        )
+        art.blit_centered(surface, controller_art, (302, 278), (44, 31))
         if candidate is not None and not candidate.get("connected"):
             controller_key = f"bt_connect:{candidate.get('address', '')}"
             controller_label = "配对连接"

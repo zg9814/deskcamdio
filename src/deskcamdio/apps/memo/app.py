@@ -9,7 +9,7 @@ import pygame
 
 from deskcamdio.core.lifecycle import App, LeaveReason, RouteState
 from deskcamdio.core.runtime import RuntimeContext
-from deskcamdio.ui import components
+from deskcamdio.ui import art, components
 from deskcamdio.ui.aquarium import ambient, seabed
 from deskcamdio.ui.typography import draw_wrapped, render_text
 
@@ -116,11 +116,11 @@ class MemoApp(App):
             seabed(surface, theme, elapsed * 0.2)
             card = pygame.Rect(48, 94, 384, 210)
             components.glass_card(surface, card, theme, alpha=216)
-            components.icon(surface, "notes", (240, 146), 38, theme.accent)
+            art.blit_centered(surface, "empty-memo-160x112-v1.png", (240, 152))
             hint = render_text("今天还没有备忘", 20, theme.text_primary, bold=True)
-            surface.blit(hint, hint.get_rect(center=(240, 200)))
+            surface.blit(hint, hint.get_rect(center=(240, 230)))
             sub = render_text("短按旋钮，说“记一下…”即可添加", 15, theme.text_secondary)
-            surface.blit(sub, sub.get_rect(center=(240, 238)))
+            surface.blit(sub, sub.get_rect(center=(240, 264)))
 
     async def leave(self, reason: LeaveReason) -> None:
         del reason

@@ -8,10 +8,10 @@ import pygame
 
 from deskcamdio.core.lifecycle import App, LeaveReason, RouteState
 from deskcamdio.core.runtime import RuntimeContext
-from deskcamdio.ui import components
+from deskcamdio.ui import art, components
 from deskcamdio.ui.aquarium import ambient, seabed
 from deskcamdio.ui.pager import PagePager
-from deskcamdio.ui.typography import render_text
+from deskcamdio.ui.typography import draw_wrapped, render_text
 
 LOGGER = logging.getLogger(__name__)
 ROMS_PER_PAGE = 5
@@ -166,13 +166,20 @@ class GbaApp(App):
             seabed(surface, theme, elapsed * 0.2)
             card = pygame.Rect(48, 92, 384, 226)
             components.glass_card(surface, card, theme, alpha=216)
-            components.icon(surface, "player-play", (240, 148), 40, theme.accent)
+            art.blit_centered(surface, "gba-cartridge-96x128-v1.png", (132, 196), (72, 96))
             empty = render_text("还没有 GBA 游戏", 20, theme.text_primary, bold=True)
-            surface.blit(empty, empty.get_rect(center=(240, 202)))
-            sub = render_text("导入 .gba ROM 后会自动出现在这里", 15, theme.text_secondary)
-            surface.blit(sub, sub.get_rect(center=(240, 235)))
-            status = render_text("手柄支持热插拔 · EC11 可紧急退出", 14, theme.text_secondary)
-            surface.blit(status, status.get_rect(center=(240, 278)))
+            surface.blit(empty, (196, 126))
+            draw_wrapped(
+                surface,
+                "导入 .gba ROM 后会自动出现在这里",
+                pygame.Rect(196, 162, 210, 50),
+                15,
+                theme.text_secondary,
+            )
+            status = render_text("蓝牙 / USB 手柄", 14, theme.accent, bold=True)
+            surface.blit(status, (196, 228))
+            exit_hint = render_text("EC11 可紧急退出", 13, theme.text_secondary)
+            surface.blit(exit_hint, (196, 254))
 
     async def leave(self, reason: LeaveReason) -> None:
         del reason

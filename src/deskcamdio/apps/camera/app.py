@@ -15,7 +15,7 @@ import pygame
 from deskcamdio.core.lifecycle import App, LeaveReason, RouteState
 from deskcamdio.core.runtime import RuntimeContext
 from deskcamdio.services.camera_client import BaseCameraClient, CameraUnavailable
-from deskcamdio.ui import components
+from deskcamdio.ui import art, components
 from deskcamdio.ui.aquarium import gradient
 from deskcamdio.ui.typography import render_text
 
@@ -225,12 +225,17 @@ class CameraApp(App):
             surface.blit(frame, inner.topleft)
         else:
             pygame.draw.rect(surface, (13, 20, 29), inner, border_radius=18)
-            hint = render_text(
-                "相机预热中…" if not self._error else self._error,
-                18,
-                theme.text_secondary,
-            )
-            surface.blit(hint, hint.get_rect(center=inner.center))
+            if self._error:
+                art.blit_centered(
+                    surface,
+                    "state-camera-unavailable-160x112-v1.png",
+                    (inner.centerx, inner.y + 94),
+                )
+                hint = render_text(self._error, 16, theme.text_secondary)
+                surface.blit(hint, hint.get_rect(center=(inner.centerx, inner.bottom - 48)))
+            else:
+                hint = render_text("相机预热中…", 18, theme.text_secondary)
+                surface.blit(hint, hint.get_rect(center=inner.center))
 
         self._buttons["thumbnail"] = self._thumbnail_rect
         components.glass_card(surface, self._thumbnail_rect, theme, alpha=245)

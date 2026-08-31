@@ -7,7 +7,7 @@ import os
 import pygame
 import pytest
 
-from deskcamdio.ui import components, renderer
+from deskcamdio.ui import art, components, renderer
 from deskcamdio.ui.themes import (
     DEFAULT_THEME_ID,
     THEMES,
@@ -97,3 +97,13 @@ def test_renderer_chrome() -> None:
     renderer.background(target, theme)
     renderer.status_bar(target, theme, online=True, bluetooth=True, battery="87%")
     renderer.status_bar(target, theme, online=False, bluetooth=False)
+
+
+def test_generated_art_loads_at_native_sizes() -> None:
+    art.clear_caches()
+    background = art.load("aquarium-far-aquatic-480-v1.png")
+    camera_fault = art.load("state-camera-unavailable-160x112-v1.png")
+    assert background is not None and background.get_size() == (480, 480)
+    assert camera_fault is not None and camera_fault.get_size() == (160, 112)
+    assert art.load("missing-art.png") is None
+    art.clear_caches()

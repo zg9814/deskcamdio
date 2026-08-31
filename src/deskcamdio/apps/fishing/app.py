@@ -16,7 +16,7 @@ from deskcamdio.apps.fishing.sprite import SpriteSheetAnimator
 from deskcamdio.apps.fishing.world import FishingWorld, ReelResult
 from deskcamdio.core.lifecycle import App, LeaveReason, RouteState
 from deskcamdio.core.runtime import RuntimeContext
-from deskcamdio.ui import renderer
+from deskcamdio.ui import art, renderer
 
 
 @dataclass(slots=True)
@@ -596,6 +596,9 @@ class FishingApp(App):
             pygame.draw.line(background, (136, 213, 222), (0, 76), (480, 76), 3)
             self._sea_background = background
         surface.blit(self._sea_background, (0, 0))
+        water_surface = art.load("fishing-water-surface-480x80-v1.png")
+        if water_surface is not None:
+            surface.blit(water_surface, (0, 36))
         self._render_decor(surface)
         shake = math.sin(self.elapsed * 38) * 4 if self.world.hooked else 0
         line_x = int(self.world.boat_x + 15 + shake)
@@ -606,7 +609,7 @@ class FishingApp(App):
             (line_x, int(self.world.hook_depth)),
             2,
         )
-        pygame.draw.circle(surface, (242, 96, 72), (line_x, 79), 5)
+        self._render_bobber(surface, line_x)
         pygame.draw.arc(
             surface,
             (205, 215, 211),
@@ -615,19 +618,45 @@ class FishingApp(App):
             math.pi * 1.6,
             2,
         )
-        for fish in self.world.fish:
-            animator = self.animators.get(fish.fish_id)
-            if animator is None:
-                animator = SpriteSheetAnimator.fish(fish.color)
-                self.animators[fish.fish_id] = animator
-            clip = "attack" if fish.state == "bite" else "swim"
-            animator.set_clip(clip)
-            animator.update(1 / 30)
-            size = {"small": 48, "medium": 64, "large": 88}[fish.size]
-            image = animator.frame((size, size), flip_x=fish.direction > 0)
-            surface.blit(image, image.get_rect(center=(int(fish.x), int(fish.y))))
+        self._render_world_fish(surface)
         self._draw_boat(surface, int(self.world.boat_x), 65, self.player.boat_level, 1.0)
         self._render_sea_hud(surface)
+
+    def _render_bobber(self, surface: pygame.Surface, line_x: int) -> None:
+        if self.world.hooked is not None:
+            name = "fishing-bobber-frame-3-v1.png"
+        elif self.reel_state != "idle":
+            name = "fishing-bobber-frame-2-v1.png"
+        else:
+            name = "fishing-bobber-frame-1-v1.png"
+        bobber = art.get(name, (64, 64))
+        if bobber is None:
+            pygame.draw.circle(surface, (242, 96, 72), (line_x, 79), 5)
+            return
+        surface.blit(bobber, bobber.get_rect(center=(line_x, 80)))
+
+    def _render_world_fish(self, surface: pygame.Surface) -> None:
+        candidates = (
+            "fishing-common-64x48-v1.png",
+            "fishing-uncommon-64x48-v1.png",
+            "fishing-rare-64x48-v1.png",
+            "fishing-legendary-64x48-v1.png",
+        )
+        for fish in self.world.fish:
+            size = {"small": 48, "medium": 64, "large": 88}[fish.size]
+            image = art.get(candidates[fish.color % len(candidates)], (size, round(size * 0.75)))
+            if image is None:
+                animator = self.animators.get(fish.fish_id)
+                if animator is None:
+                    animator = SpriteSheetAnimator.fish(fish.color)
+                    self.animators[fish.fish_id] = animator
+                clip = "attack" if fish.state == "bite" else "swim"
+                animator.set_clip(clip)
+                animator.update(1 / 30)
+                image = animator.frame((size, size), flip_x=fish.direction > 0)
+            elif fish.direction > 0:
+                image = pygame.transform.flip(image, True, False)
+            surface.blit(image, image.get_rect(center=(int(fish.x), int(fish.y))))
 
     def _render_sea_hud(self, surface: pygame.Surface) -> None:
         assert self.context is not None

@@ -6,7 +6,7 @@ import pygame
 
 from deskcamdio.core.lifecycle import App, LeaveReason, RouteState
 from deskcamdio.core.runtime import RuntimeContext
-from deskcamdio.ui import components, renderer
+from deskcamdio.ui import art, components, renderer
 from deskcamdio.ui.pager import PagePager
 from deskcamdio.ui.themes import ThemeService
 from deskcamdio.ui.typography import render_text
@@ -100,8 +100,13 @@ class LauncherApp(App):
     def _render_page(self, surface: pygame.Surface, page: int) -> None:
         theme = self._context.theme.tokens if self._context else ThemeService().tokens
         renderer.background(surface, theme)
-        title = render_text("Fish 应用", 24, theme.text_primary, bold=True)
-        surface.blit(title, (22, 22))
+        art.blit_centered(
+            surface,
+            f"brand-fish-mark-{theme.id}-32-v1.png",
+            (36, 36),
+        )
+        title = render_text("应用", 24, theme.text_primary, bold=True)
+        surface.blit(title, (58, 22))
         hint = render_text(
             "右滑返回水族首页" if page == 0 else f"第 {page + 1} 页",
             14,

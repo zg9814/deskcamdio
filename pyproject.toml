@@ -48,6 +48,7 @@ deskcamdio = [
   "assets/fish/*.png",
   "assets/fish/*.toml",
   "assets/aquatic/*.png",
+  "assets/art/*.png",
   "assets/icons/*.png",
   "assets/watermark/*.png",
 ]

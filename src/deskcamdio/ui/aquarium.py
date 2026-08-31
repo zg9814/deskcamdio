@@ -7,6 +7,7 @@ from importlib.resources import files
 
 import pygame
 
+from deskcamdio.ui import art
 from deskcamdio.ui.themes import ThemeTokens
 
 _props: dict[str, pygame.Surface] = {}
@@ -25,6 +26,19 @@ def gradient(surface: pygame.Surface, theme: ThemeTokens) -> None:
 
 
 def ambient(surface: pygame.Surface, theme: ThemeTokens, elapsed: float) -> None:
+    far = art.load(f"aquarium-far-{theme.id}-480-v1.png")
+    if far is not None:
+        surface.blit(far, (0, 0))
+        mid = art.load("aquarium-mid-overlay-480-v1.png")
+        if mid is not None:
+            surface.blit(mid, (0, 0))
+        # A tiny deterministic bubble layer keeps the page alive without
+        # allocating or rescaling a full-screen surface every frame.
+        for index in range(4):
+            y = 390 - ((elapsed * (7 + index) + index * 89) % 330)
+            x = 54 + (index * 113 + math.sin(elapsed * 0.55 + index) * 9) % 370
+            pygame.draw.circle(surface, theme.accent, (round(x), round(y)), 2 + index % 2, 1)
+        return
     gradient(surface, theme)
     wash = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
     pygame.draw.rect(wash, (*theme.water, 92), (0, 74, 480, 330))
@@ -43,6 +57,10 @@ def ambient(surface: pygame.Surface, theme: ThemeTokens, elapsed: float) -> None
 
 
 def seabed(surface: pygame.Surface, theme: ThemeTokens, elapsed: float) -> None:
+    foreground = art.load("aquarium-foreground-overlay-480-v1.png")
+    if foreground is not None:
+        surface.blit(foreground, (0, 0))
+        return
     points = [(0, 396)]
     points += [
         (x, round(394 + math.sin(x * 0.032 + elapsed * 0.45) * 5)) for x in range(0, 481, 16)

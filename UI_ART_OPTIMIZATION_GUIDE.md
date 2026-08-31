@@ -322,4 +322,4 @@ Flat solid shapes only, no text, no gradients, no mockup, no trademark resemblan
 - `art/generated/processed/generated-assets-contact-sheet-v1.png`用于完整视觉验收。
 - `scripts/process_generated_art.py`可重复生成原生尺寸资产；`scripts/qa_generated_art.py`检查清单、尺寸、空图、源文件和Alpha。
 
-当前自动验收结果为76/76文件通过，63个RGBA文件全部使用0/255二值Alpha。下一阶段不是继续扩充素材，而是把候选资产接入真实页面，完成480×480逐页截图、真机性能和主题对比度验收。
+当前自动验收结果为76/76文件通过，63个RGBA文件全部使用0/255二值Alpha。资产已通过懒加载方式接入真实Pygame页面，并完成480×480无头模拟、逐页截图与wheel打包测试；下一阶段只需在Pi Zero 2 W真机上完成帧时间、RSS、屏幕观感和主题对比度验收。
