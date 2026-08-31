@@ -310,3 +310,16 @@ Flat solid shapes only, no text, no gradients, no mockup, no trademark resemblan
 6. **四主题验收**：逐页截图、联系表、真机观察距离测试和性能回归。
 
 正式批量生成前，只批准一张风格目标板和一条主鱼种子。未通过这两个门槛，不继续生成完整素材库。
+
+## 11. 美术资产交付状态（2026-08-31）
+
+本指导书对应的AI位图候选库已经完成，位于 `art/generated/`：
+
+- 30张原始生成图，保留被替换的v1/v2版本用于溯源。
+- 76个规范化资产，覆盖主鱼与动作、陪伴鱼、水草海床、四主题背景、空状态、摄像头故障、手柄状态、低内存、存储不足、GBA/PS1、钓鱼流程、品牌标记和启动页。
+- 功能图标、文字、控件、焦点环、进度条和弹窗继续由代码绘制，不属于AI位图资产缺口。
+- `art/generated/asset-manifest.csv`记录尺寸、透明度、用途、主题、源文件、生成方式、许可证和审核状态。
+- `art/generated/processed/generated-assets-contact-sheet-v1.png`用于完整视觉验收。
+- `scripts/process_generated_art.py`可重复生成原生尺寸资产；`scripts/qa_generated_art.py`检查清单、尺寸、空图、源文件和Alpha。
+
+当前自动验收结果为76/76文件通过，63个RGBA文件全部使用0/255二值Alpha。下一阶段不是继续扩充素材，而是把候选资产接入真实页面，完成480×480逐页截图、真机性能和主题对比度验收。
