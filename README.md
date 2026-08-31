@@ -5,10 +5,19 @@
 
 ## 开发（Windows 承担模拟器与测试）
 
+Windows下可直接双击仓库根目录的 `run-local.cmd` 启动480×480交互模拟器。
+首次启动会由`uv`自动准备Python 3.13和项目依赖。
+
 ```powershell
 uv sync            # 创建 .venv 并按 uv.lock 安装（自动获取 CPython 3.13）
 uv run deskcamdio-device --version
 uv run pytest --cov=deskcamdio --cov-branch --cov-fail-under=85
+
+# 命令行启动方式（与双击 run-local.cmd 相同）
+.\scripts\run_local.ps1
+
+# 无窗口快速验证
+.\scripts\run_local.ps1 -Headless -Frames 60
 ```
 
 质量门槛：`ruff format` 零差异、`ruff check` 零错误、mypy 通过 core/services/platform、
